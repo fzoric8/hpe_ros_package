@@ -333,6 +333,14 @@ class uavController:
 
             return 0.0, 0.0
 
+    def get_travel_time(self, msg_header): 
+
+        capture_time = msg_header.stamp.secs
+
+        travel_time = rospy.Time().now().to_sec() - capture_time
+
+        return travel_time
+    
     def compose_joy_msg(self, pitch, roll, yaw, height):
 
         joy_msg = Joy()

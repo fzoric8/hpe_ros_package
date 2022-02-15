@@ -3,6 +3,7 @@
     <arg name="frequency" value="5"/>
     <arg name="video_dev" value="/dev/video0"/>
     <arg name="model_path" value="/home/developer/catkin_ws/src/hpe_ros_package/src/models/pose_resnet_152_384x384.pth.tar"/>
+    <arg name="compress"   value="true"/>
     
     <!-- config files for each backbone model are located into experiments folder !-->
     <arg name="config_file" value="/home/developer/catkin_ws/src/hpe_ros_package/src/experiments/mpii/resnet152/384x384_d256x3_adam_lr1e-3.yaml"/>
@@ -23,5 +24,13 @@
         <param name="io_method" value="mmap"/>
     </node>
     
+    <group if="$(arg compress)">
+
+        <node name="republish" type="republish" pkg="image_transport" output="screen" args="raw in:=/usb_camera/image_raw compressed out:=/usb_camera/image_raw" />
+    
+    </group>
+
+
+
 </launch>
 

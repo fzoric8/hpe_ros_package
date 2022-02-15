@@ -40,6 +40,11 @@ from PIL import Image as PILImage
 
 import dataset
 import models
+import io
+
+
+# Tracing execution:
+# https://github.com/boschresearch/ros1_tracetools 
 
 from std_msgs.msg import Bool
 
@@ -67,16 +72,10 @@ class HumanPoseEstimationROS():
         self.nn_input_formed = False
         self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-
         rospy.loginfo("[HPE-SimpleBaselines] Loading model")
         self.model = self._load_model(config)
         rospy.loginfo("[HPE-SimpleBaselines] Loaded model...")
         self.model_ready = True
-
-
-        # Initialize subscribers/publishers
-        self._init_publishers()
-        self._init_subscribers()
 
         self.nn_input = None
         
@@ -94,8 +93,20 @@ class HumanPoseEstimationROS():
         # If HMI integration (use compressed image)
         self.compressed_stickman = False
 
+        # Image compression
+        self.use_compressed_img = False
+        self.use_normal_img = not self.use_compressed_img
+
+        # Initialize subscribers/publishers 
+        self._init_publishers(); self._init_subscribers()
+
     def _init_subscribers(self):
-        self.camera_sub = rospy.Subscriber("usb_camera/image_raw", Image, self.image_cb, queue_size=1)
+
+        if self.use_compressed_img:
+            self.camera_sub = rospy.Subscriber("usb_camera/image_raw/compressed", Image, self.compressed_img_cb, queue_size=1)
+        
+        if self.use_normal_img:
+            self.camera_sub = rospy.Subscriber("usb_camera/image_raw", Image, self.image_cb, queue_size=1)
         #self.darknet_sub = rospy.Subscriber("/darknet_ros/bounding_boxes", BoundingBoxes, self.darknet_cb, queue_size=1)
 
     def _init_publishers(self):
@@ -129,9 +140,10 @@ class HumanPoseEstimationROS():
 
     def image_cb(self, msg):
 
-        start_time = rospy.Time.now().to_sec()
+        # Get travel time (time in which image has been captured to recieving in callback)
+        rospy.loginfo("Travel time is: {}".format(self.get_travel_time(msg.header)))
 
-        self.first_img_reciv = True
+        start_time = rospy.Time.now().to_sec()
 
         debug_img = False
         if debug_img:
@@ -170,13 +182,58 @@ class HumanPoseEstimationROS():
         # Transform img to 
         self.nn_input = transform(self.cam_img).unsqueeze(0).to(self.device)   
 
-        self.nn_input_formed = True
+        self.first_img_reciv = True; self.nn_input_formed = True
         
         if debug_img:
             rospy.loginfo("NN_INPUT {}".format(self.nn_input))             
 
         duration = rospy.Time.now().to_sec() - start_time 
-        #rospy.loginfo("Duration of image_cb is: {}".format(duration)) # max --> 0.01s
+        
+        rospy.loginfo("Duration of image_cb is: {}".format(duration)) # max --> 0.01s
+
+    def compressed_img_cb(self, msg): 
+
+        rospy.loginfo("Compressed image travel time is: {}".format(self.get_travel_time(msg.header)))
+
+        start_time = rospy.Time.now().to_sec()
+
+
+        self.org_img = numpy.array(io.BytesIO(bytearray(msg.data)), dtype=numpy.uint8)
+
+        # Normalize
+        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                         std=[0.229, 0.224, 0.225])
+
+        # Tensor transformations
+        transform = transforms.Compose([
+                                        transforms.ToTensor(),
+                                        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                             std=[0.229, 0.224, 0.225])])
+        #if self.x != None and self.y != None:
+        #    self.cam_img, self.center, self.scale = self.aspect_ratio_scaler(self.org_img, self.x, self.y, self.w, self.h)
+        #else:
+        #    self.cam_img, self.center, self.scale = self.aspect_ratio_scaler(self.org_img, 0, 0, msg.width, msg.height)
+
+        self.cam_img = cv2.resize(self.org_img, dsize=(348,348), interpolation=cv2.INTER_CUBIC)
+        
+        #self.logger.info("Scale is: {}".format(self.scale))
+        self.center = 384/2, 384/2
+
+        # https://github.com/microsoft/human-pose-estimation.pytorch/issues/26
+        
+        # Check this scaling
+        self.scale = numpy.array([1, 1], dtype=numpy.float32) 
+        
+        # Transform img to 
+        self.nn_input = transform(self.cam_img).unsqueeze(0).to(self.device)   
+
+        self.first_img_reciv = True; self.nn_input_formed = True
+             
+
+        duration = rospy.Time.now().to_sec() - start_time 
+
+        rospy.loginfo("Duration of image_cb is: {}".format(duration)) # max --> 0.01s
+
                          
     def darknet_cb(self, darknet_boxes):
         
@@ -245,7 +302,7 @@ class HumanPoseEstimationROS():
         filtered_lx, filtered_ly, filtered_rx, filtered_ry = self.filtering(p_right, p_left, type=filter_type, window_size=w_size)
 
         preds_[10][0] = int(filtered_lx); preds_[10][1] = int(filtered_ly); 
-        preds_[15][0] = int(filtered_rx); preds_[15][1] = int(filtered_ry); 
+        preds_[15][0] = int(filtered_rx); preds_[15][1] = int(filtered_ry);     
 
         return preds_
 
@@ -289,6 +346,14 @@ class HumanPoseEstimationROS():
 
             return p_left[0], p_left[1], p_right[0], p_right[1]
             
+    def get_travel_time(self, msg_header): 
+
+        capture_time = msg_header.stamp.secs
+
+        travel_time = rospy.Time().now().to_sec() - capture_time
+
+        return travel_time
+    
     #https://www.ros.org/news/2018/09/roscon-2017-determinism-in-ros---or-when-things-break-sometimes-and-how-to-fix-it----ingo-lutkebohle.html
     def run(self):
 
@@ -333,8 +398,8 @@ class HumanPoseEstimationROS():
                 rospy.logdebug("Preds shape is: {}".format(preds.shape))
                 # Preds shape is [1, 16, 2] (or num persons is first dim)
                 # rospy.loginfo("Preds shape is: {}".format(preds[0].shape))
-                
-                preds = self.filter_predictions(preds, "avg", 7)
+
+                preds = self.filter_predictions(preds, "avg", 5)
 
                 # Draw stickman
                 stickman = HumanPoseEstimationROS.draw_stickman(pil_img, preds)
@@ -359,7 +424,7 @@ class HumanPoseEstimationROS():
                 self.pred_pub.publish(preds_ros_msg)
 
                 duration = rospy.Time.now().to_sec() - start_time
-                debug_runtime = False
+                debug_runtime = True
                 if debug_runtime:
                     rospy.loginfo("Run duration is: {}".format(duration))
 
