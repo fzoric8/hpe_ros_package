@@ -45,6 +45,9 @@ class HumanPose3D():
                          6:"pelvis", 7:"thorax", 8:"upper_neck", 9:"head_top", 10:"r_wrist",
                          11:"r_elbow", 12:"r_shoulder", 13:"l_shoulder", 14:"l_elbow", 15:"l_wrist"}
 
+        # Dictionary that models parent-child relationship for better publishing
+        self.pc_dict = {"head_top":"upper_neck", "upper_neck":"torax", "thorax":"l_shoulder", "thorax"}
+
         # Initialize transform broadcaster                  
         self.tf_br = tf.TransformBroadcaster()
 
