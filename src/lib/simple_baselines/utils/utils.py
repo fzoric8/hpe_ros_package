@@ -16,7 +16,7 @@ from pathlib import Path
 import torch
 import torch.optim as optim
 
-from core.config import get_model_name
+from simple_baselines.core.config import get_model_name
 
 
 def create_logger(cfg, cfg_name, phase='train'):

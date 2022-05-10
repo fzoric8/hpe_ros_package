@@ -16,7 +16,7 @@ import json_tricks as json
 import numpy as np
 from scipy.io import loadmat, savemat
 
-from dataset.JointsDataset import JointsDataset
+from simple_baselines.dataset.JointsDataset import JointsDataset
 
 
 logger = logging.getLogger(__name__)

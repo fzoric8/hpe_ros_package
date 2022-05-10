@@ -29,18 +29,18 @@ import torch.utils.data.distributed
 import torchvision.transforms as transforms
 
 import _init_paths
-from core.config import config
-from core.config import update_config
-from core.config import update_dir
-from core.inference import get_final_preds, get_max_preds
-from utils.utils import create_logger
-from utils.transforms import get_affine_transform
+from simple_baselines.core.config import config
+from simple_baselines.core.config import update_config
+from simple_baselines.core.config import update_dir
+from simple_baselines.core.inference import get_final_preds, get_max_preds
+from simple_baselines.utils.utils import create_logger
+from simple_baselines.utils.transforms import get_affine_transform
 
 from PIL import ImageDraw, ImageFont
 from PIL import Image as PILImage
 
-import dataset
-import models
+import simple_baselines.dataset
+import simple_baselines.models
 
 from std_msgs.msg import Bool
 
@@ -114,10 +114,10 @@ class HumanPoseEstimationROS():
         self.image_compressed_pub = rospy.Publisher("/stickman_compressed", CompressedImage, queue_size=1)
         self.pred_pub = rospy.Publisher("/hpe_preds", Float64MultiArray, queue_size=1)
 
-    def _load_model(self, config):
+    def _load_sb_model(self, config):
         
         rospy.loginfo("Model name is: {}".format(config.MODEL.NAME))
-        model = eval('models.' + config.MODEL.NAME + '.get_pose_net')(
+        model = eval('simple_baselines.models.' + config.MODEL.NAME + '.get_pose_net')(
         config, is_train=False)
 
         rospy.loginfo("Passed config is: {}".format(config))
@@ -136,6 +136,11 @@ class HumanPoseEstimationROS():
         model.to(self.device)           
         
         return model
+
+    def _load_lpn_model(self, config): 
+        # TODO: 
+        # Add functionality for adding lightweight model
+
 
     def image_cb(self, msg):
 
