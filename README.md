@@ -64,6 +64,13 @@ Now we have attitude zone control which sends commands to UAV in joy msg type.
 It's possible to easily implement position control also. 
 
 
+### Neural networks for HPE
+
+Available neural networks for HPE which are similar to SimpleBaselines are: 
+ - [HRNet](https://github.com/HRNet) 
+ - [LPN-Simple and lightweight pose estimation](https://github.com/zhang943/lpn-pytorch) 
+
+
 
 ### TODO High priority: 
 
@@ -71,7 +78,7 @@ It's possible to easily implement position control also.
  - [ ] Add calibration and dynamic control to arguments in launch files
  - [ ] Finish depth control (pitch/depth control)
  - [ ] Try HRNet --> TBD (not neccesary for now)  
-
+ - [ 
 ### TODO Low priority: 
 
  - [ ] Try 3d pose estimation 
