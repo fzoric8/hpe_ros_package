@@ -114,7 +114,7 @@ class HumanPoseEstimationROS():
         self.image_compressed_pub = rospy.Publisher("/stickman_compressed", CompressedImage, queue_size=1)
         self.pred_pub = rospy.Publisher("/hpe_preds", Float64MultiArray, queue_size=1)
 
-    def _load_sb_model(self, config):
+    def _load_model(self, config):
         
         rospy.loginfo("Model name is: {}".format(config.MODEL.NAME))
         model = eval('simple_baselines.models.' + config.MODEL.NAME + '.get_pose_net')(
@@ -136,10 +136,6 @@ class HumanPoseEstimationROS():
         model.to(self.device)           
         
         return model
-
-    def _load_lpn_model(self, config): 
-        # TODO: 
-        # Add functionality for adding lightweight model
 
 
     def image_cb(self, msg):

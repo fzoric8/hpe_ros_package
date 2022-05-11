@@ -19,6 +19,7 @@ import os
 import sys
 import pprint
 import statistics
+import traceback
 
 import torch
 import torch.nn.parallel
@@ -29,18 +30,17 @@ import torch.utils.data.distributed
 import torchvision.transforms as transforms
 
 import _init_paths
-from simple_baselines.core.config import config
-from simple_baselines.core.config import update_config
-from simple_baselines.core.config import update_dir
-from simple_baselines.core.inference import get_final_preds, get_max_preds
-from simple_baselines.utils.utils import create_logger
-from simple_baselines.utils.transforms import get_affine_transform
+from lpn.config import cfg
+from lpn.config import update_config
+from lpn.core.inference import get_final_preds, get_max_preds, get_final_preds_using_softargmax, get_predicitons
+from lpn.utils.utils import create_logger, get_model_summary
+from lpn.models.lpn import get_pose_net
 
 from PIL import ImageDraw, ImageFont
 from PIL import Image as PILImage
 
-import simple_baselines.dataset
-import simple_baselines.models
+import lpn.dataset
+import lpn.models
 
 from std_msgs.msg import Bool
 
@@ -48,28 +48,30 @@ class HumanPoseEstimationROS():
 
     def __init__(self, frequency, args):
 
-        rospy.init_node("hpe_simplebaselines")
+        rospy.init_node("hpe_lpn", log_level=rospy.DEBUG)
         
         self.rate = rospy.Rate(int(frequency))
 
         # Update configuration file
-        update_config(args.cfg)
-        reset_config(config, args)
-        self.config = config
+        reset_config(cfg, args)
+        print("args are: {}".format(args))
+        update_config(cfg, args)
+        # Add config to class variable to enable propagation to run method
+        self.cfg = cfg
 
         # Legacy CUDNN --> probably not necessary 
-        cudnn.benchmark = config.CUDNN.BENCHMARK
-        torch.backends.cudnn.deterministic = config.CUDNN.DETERMINISTIC
-        torch.backends.cudnn.enabled = config.CUDNN.ENABLED
+        cudnn.benchmark = cfg.CUDNN.BENCHMARK
+        torch.backends.cudnn.deterministic = cfg.CUDNN.DETERMINISTIC
+        torch.backends.cudnn.enabled = cfg.CUDNN.ENABLED
 
         self.model_ready = False
         self.first_img_reciv = False
         self.nn_input_formed = False
         self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-        rospy.loginfo("[HPE-SimpleBaselines] Loading model")
-        self.model = self._load_model(config)
-        rospy.loginfo("[HPE-SimpleBaselines] Loaded model...")
+        rospy.loginfo("[HPE-LPN] Loading model")
+        self.model = self._load_model(cfg)
+        rospy.loginfo("[HPE-LPN] Loaded model...")
         self.model_ready = True
 
         print(args)
@@ -114,15 +116,15 @@ class HumanPoseEstimationROS():
         self.image_compressed_pub = rospy.Publisher("/stickman_compressed", CompressedImage, queue_size=1)
         self.pred_pub = rospy.Publisher("/hpe_preds", Float64MultiArray, queue_size=1)
 
-    def _load_sb_model(self, config):
+    def _load_model(self, config):
         
         rospy.loginfo("Model name is: {}".format(config.MODEL.NAME))
-        model = eval('simple_baselines.models.' + config.MODEL.NAME + '.get_pose_net')(
-        config, is_train=False)
+        # Eval method is used to load different models! 
+        model = get_pose_net(config, is_train=False)
 
         rospy.loginfo("Passed config is: {}".format(config))
-        rospy.loginfo("config.TEST.MODEL.FILE")
 
+        # Hacked! -> incorrect model file name 
         if config.TEST.MODEL_FILE:
             model_state_file = config.TEST.MODEL_FILE
             rospy.loginfo('=> loading model from {}'.format(config.TEST.MODEL_FILE))
@@ -136,10 +138,6 @@ class HumanPoseEstimationROS():
         model.to(self.device)           
         
         return model
-
-    def _load_lpn_model(self, config): 
-        # TODO: 
-        # Add functionality for adding lightweight model
 
 
     def image_cb(self, msg):
@@ -172,10 +170,10 @@ class HumanPoseEstimationROS():
         #else:
         #    self.cam_img, self.center, self.scale = self.aspect_ratio_scaler(self.org_img, 0, 0, msg.width, msg.height)
 
-        self.cam_img = cv2.resize(self.org_img, dsize=(348,348), interpolation=cv2.INTER_CUBIC)
+        self.cam_img = cv2.resize(self.org_img, dsize=(256,256), interpolation=cv2.INTER_CUBIC)
         
         #self.logger.info("Scale is: {}".format(self.scale))
-        self.center = 384/2, 384/2
+        self.center = 256/2, 256/2
 
         # https://github.com/microsoft/human-pose-estimation.pytorch/issues/26
         
@@ -193,57 +191,12 @@ class HumanPoseEstimationROS():
         duration = rospy.Time.now().to_sec() - start_time 
         #rospy.loginfo("Duration of image_cb is: {}".format(duration)) # max --> 0.01s
                          
-    def darknet_cb(self, darknet_boxes):
-        
-        max_area = 0
-        for bbox in darknet_boxes.bounding_boxes: 
-            if bbox.Class == "person":
-                this_area = (bbox.xmax - bbox.xmin) * (bbox.ymax - bbox.ymin)
-                if this_area > max_area:
-                    max_area = this_area
-                    self.x = bbox.xmin
-                    self.y = bbox.ymin
-                    self.w = bbox.xmax - bbox.xmin
-                    self.h = bbox.ymax - bbox.ymin
-        else:
-            return
-
-    def aspect_ratio_scaler(self, img, x0, y0, width, height):
-
-        box = [x0, y0, width, height]
-        x,y,w,h = box[:4]
-        
-        center = numpy.zeros((2), dtype=numpy.float32)
-        center[0] = x + w * 0.5
-        center[1] = y + h * 0.5
-        aspect_ratio = width * 1.0 / height
-        pixel_std = 200
-        if w > aspect_ratio * h:
-            h = w * 1.0 / aspect_ratio
-        elif w < aspect_ratio * h:
-            w = h * aspect_ratio
-        scale = numpy.array(
-            [w * 1.0 / pixel_std, h * 1.0 / pixel_std],
-            dtype=numpy.float32)
-        if center[0] != -1:
-            scale = scale * 1.25
-
-        r = 0
-        trans = get_affine_transform(center, scale, r, config.MODEL.IMAGE_SIZE)
-        scaled_img = cv2.warpAffine(
-            img,
-            trans,
-            (int(config.MODEL.IMAGE_SIZE[0]), int(config.MODEL.IMAGE_SIZE[1])),
-            flags=cv2.INTER_LINEAR)
-
-        #scaled_img = numpy.array(scaled_img, dtype=numpy.uint8)
-
-        return scaled_img, center, scale
+  
 
     def filter_predictions(self, predictions, filter_type="avg", w_size=3): 
 
-
-        preds_ = predictions[0]
+        # Different indexing between SB and LPN
+        preds_ = predictions
 
         for i, prediction in enumerate(preds_): 
             
@@ -310,7 +263,7 @@ class HumanPoseEstimationROS():
         self.first = True
 
         while not self.model_ready:
-            self.logger.info("SimpleBaselines model for HPE not ready.")
+            self.logger.info("LPN model for HPE not ready.")
         
         while not rospy.is_shutdown(): 
 
@@ -331,27 +284,26 @@ class HumanPoseEstimationROS():
 
                 # Heatmaps
                 start_time3 = rospy.Time.now().to_sec()
+                # Detach basically detaches computational graph which contains gradient descent info
                 batch_heatmaps = output.cpu().detach().numpy()
-                # Get predictions                
-                #preds, maxvals = get_final_preds(config, batch_heatmaps, self.center, self.scale)
-                # preds otuput is list of lists, list that contain list that contains 16 points!
-                preds, maxvals = get_max_preds(batch_heatmaps)
-                rospy.logdebug("NN inference2 duration: {}".format(rospy.Time.now().to_sec() - start_time3))
-
-                # Heatmap size is 88x88, so this scales predictions to image size 
-                for pred in preds[0]:
-                    pred[0] = pred[0]  * (640/88)
-                    pred[1] = pred[1]  * (480/88)
-                rospy.logdebug(str(preds[0][0][0]) + "   " + str(preds[0][0][1]))
+                #HPERos.save_heatmaps(batch_heatmaps)
+                #preds, maxvals = get_max_preds(batch_heatmaps)
+                preds = get_predicitons(batch_heatmaps, scaling=True)
+                #preds = get_final_preds_using_softargmax(self.cfg, output, self.center, self.scale)
+                rospy.logdebug("Duration of get_max_preds is: {}".format(rospy.Time.now().to_sec() - start_time3))
                 
-                rospy.logdebug("Preds are: {}".format(preds))     
-                rospy.logdebug("Preds shape is: {}".format(preds.shape))
+                debug_predictions = False
+                if debug_predictions:
+                    rospy.logdebug(str(preds[0][0][0]) + "   " + str(preds[0][0][1]))                
+                    rospy.logdebug("Preds are: {}".format(preds))     
+                    rospy.logdebug("Preds shape is: {}".format(preds.shape))
                 # Preds shape is [1, 16, 2] (or num persons is first dim)
                 # rospy.loginfo("Preds shape is: {}".format(preds[0].shape))
                 
-                preds = self.filter_predictions(preds, "avg", 7)
+                preds = self.filter_predictions(preds, "avg", 3)
 
                 # Draw stickman
+                start_time5 = rospy.Time.now().to_sec()
                 stickman = HumanPoseEstimationROS.draw_stickman(pil_img, preds)
                 
                 # If compressed_stickman (zones don't work, no subscriber on compressed)
@@ -374,12 +326,19 @@ class HumanPoseEstimationROS():
                 self.pred_pub.publish(preds_ros_msg)
 
                 duration = rospy.Time.now().to_sec() - start_time
-                debug_runtime = False
+                debug_runtime = True
                 if debug_runtime:
                     rospy.loginfo("Run duration is: {}".format(duration))
-
+                
             
-            self.rate.sleep()
+            #self.rate.sleep()
+
+    @staticmethod
+    def save_heatmaps(heatmaps): 
+        
+        num_heatmaps = heatmaps.shape[1]
+        for i in range(num_heatmaps):
+            numpy.savetxt('/home/developer/catkin_ws/src/hpe_ros_package/heatmaps/hm_{}.csv'.format(i), heatmaps[0, i, :, :], delimiter=',')
 
     @staticmethod        
     def avg_list(list_data):
@@ -455,52 +414,50 @@ class HumanPoseEstimationROS():
 
         return msg
 
+# Method with global params
 def reset_config(config, args):
     if args.gpus:
         config.GPUS = args.gpus
     if args.workers:
         config.WORKERS = args.workers
-    if args.use_detect_bbox:
-        config.TEST.USE_GT_BBOX = not args.use_detect_bbox
-    if args.shift_heatmap:
-        config.TEST.SHIFT_HEATMAP = args.shift_heatmap
-    if args.model_file:
-        config.TEST.MODEL_FILE = args.model_file
-    if args.coco_bbox_file:
-        config.TEST.COCO_BBOX_FILE = args.coco_bbox_file
+    if args.modelDir:
+        config.OUTPUT_DIR = args.modelDir
+    if args.modelFile: 
+        config.MODEL_FILE = args.modelFile
+    #if args.modelFile: 
+    #    cfg.TEST.MODEL_FILE = os.path.join(args.modelDir, args.modelFile)
+    #    print("cfg.TEST.MODEL_FILE is: {}".format(cfg.TEST.MODEL_FILE))
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Train keypoints network')
-    # general
+
     parser.add_argument('--cfg',
                         help='experiment configure file name',
-                        required=True,
-                        type=str)
+                        type=str,
+                        # default="experiments/mpii/lpn/lpn50_256x256_gd256x2_gc.yaml")
+                        default="experiments/mpii/lpn/lpn50_256x192_gd256x2_gc.yaml")
+    # Needed args!
+    parser.add_argument('--modelDir',
+                        help='model directory',
+                        type=str,
+                        default='')
+    parser.add_argument('--logDir',
+                        help='log directory',
+                        type=str,
+                        default='')
+    parser.add_argument('--modelFile', 
+                        help="model file", 
+                        type=str, 
+                        default='')
     # training
-    parser.add_argument('--frequent',
-                        help='frequency of logging',
-                        default=config.PRINT_FREQ,
-                        type=int)
     parser.add_argument('--gpus',
                         help='gpus',
                         type=str)
     parser.add_argument('--workers',
                         help='num of dataloader workers',
                         type=int)
-    parser.add_argument('--model-file',
-                        help='model state file',
-                        type=str)
-    parser.add_argument('--use-detect-bbox',
-                        help='use detect bbox',
-                        action='store_true')
-    parser.add_argument('--coco-bbox-file',
-                        help='coco detection bbox file',
-                        type=str)
-    parser.add_argument('--shift-heatmap', 
-                        help="shift heatmap", 
-                        default=False, 
-                        type=bool)
+    # inference cam
     parser.add_argument('--use-depth', 
                         help="use depth cam", 
                         default=False, 
