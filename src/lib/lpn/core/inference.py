@@ -106,27 +106,32 @@ class SoftArgmax2D(nn.Module):
 
         px = torch.sum(probs * self.WX, dim=(2, 3))
         py = torch.sum(probs * self.WY, dim=(2, 3))
-        preds = torch.stack((px, py), dim=-1).cpu().numpy()
+        preds = torch.stack((px, py), dim=-1)
 
-        idx = np.round(preds).astype(np.int32)
-        maxvals = np.zeros(shape=(b, c, 1))
-        for bi in range(b):
-            for ci in range(c):
-                maxvals[bi, ci, 0] = x[bi, ci, idx[bi, ci, 1], idx[bi, ci, 0]]
+        # I don't use maxvals and I don't know what they do!
+        # Copy to CPU? Bottleneck!
+        #preds = preds.cpu().detach().numpy()
 
-        return preds, maxvals
+        #idx = np.round(preds).astype(np.int32)
+        #maxvals = np.zeros(shape=(b, c, 1))
+        #for bi in range(b):
+        #    for ci in range(c):
+        #        maxvals[bi, ci, 0] = x[bi, ci, idx[bi, ci, 1], idx[bi, ci, 0]]
+
+        return preds
 
 
 def get_final_preds_using_softargmax(config, batch_heatmaps, center, scale):
     soft_argmax = SoftArgmax2D(config.MODEL.HEATMAP_SIZE[1], config.MODEL.HEATMAP_SIZE[0], beta=160)
-    coords, maxvals = soft_argmax(batch_heatmaps)
+    coords = soft_argmax(batch_heatmaps)
 
     heatmap_height = batch_heatmaps.shape[2]
     heatmap_width = batch_heatmaps.shape[3]
 
-    batch_heatmaps = batch_heatmaps.cpu().numpy()
-
-    # post-processing
+    batch_heatmaps = batch_heatmaps.cpu().detach().numpy()
+    coords = coords.cpu().detach().numpy()
+    
+    # post-processing --> Not sure what this does
     if config.TEST.POST_PROCESS:
         for n in range(coords.shape[0]):
             for p in range(coords.shape[1]):
@@ -142,12 +147,13 @@ def get_final_preds_using_softargmax(config, batch_heatmaps, center, scale):
                     )
                     coords[n][p] += np.sign(diff) * .25
 
+
     preds = coords.copy()
 
     # Transform back
-    for i in range(coords.shape[0]):
-        preds[i] = transform_preds(
-            coords[i], center[i], scale[i], [heatmap_width, heatmap_height]
-        )
+    #for i in range(coords.shape[0]):
+    #    preds[i] = transform_preds(
+    #        coords[i], center[i], scale[i], [heatmap_width, heatmap_height]
+    #    )
 
-    return preds, maxvals
+    return preds

@@ -19,6 +19,7 @@ import os
 import sys
 import pprint
 import statistics
+import traceback
 
 import torch
 import torch.nn.parallel
@@ -31,7 +32,7 @@ import torchvision.transforms as transforms
 import _init_paths
 from lpn.config import cfg
 from lpn.config import update_config
-from lpn.core.inference import get_final_preds, get_max_preds
+from lpn.core.inference import get_final_preds, get_max_preds, get_final_preds_using_softargmax
 from lpn.utils.utils import create_logger, get_model_summary
 from lpn.models.lpn import get_pose_net
 
@@ -55,6 +56,8 @@ class HumanPoseEstimationROS():
         reset_config(cfg, args)
         print("args are: {}".format(args))
         update_config(cfg, args)
+        # Add config to class variable to enable propagation to run method
+        self.cfg = cfg
 
         # Legacy CUDNN --> probably not necessary 
         cudnn.benchmark = cfg.CUDNN.BENCHMARK
@@ -120,9 +123,8 @@ class HumanPoseEstimationROS():
         model = get_pose_net(config, is_train=False)
 
         rospy.loginfo("Passed config is: {}".format(config))
-        rospy.loginfo("config.TEST.MODEL_FILE")
-        rospy.loginfo("config.TEST.MODEL_FILE")
 
+        # Hacked! -> incorrect model file name 
         if config.TEST.MODEL_FILE:
             model_state_file = config.TEST.MODEL_FILE
             rospy.loginfo('=> loading model from {}'.format(config.TEST.MODEL_FILE))
@@ -282,28 +284,33 @@ class HumanPoseEstimationROS():
 
                 # Heatmaps
                 start_time3 = rospy.Time.now().to_sec()
-                batch_heatmaps = output.cpu().detach().numpy()
-                # Get predictions                
-                #preds, maxvals = get_final_preds(config, batch_heatmaps, self.center, self.scale)
-                # preds otuput is list of lists, list that contain list that contains 16 points!
-                preds, maxvals = get_max_preds(batch_heatmaps)
-                rospy.logdebug("NN inference2 duration: {}".format(rospy.Time.now().to_sec() - start_time3))
+                # Detach basically detaches computational graph which contains gradient descent info
+                #batch_heatmaps = output.detach().numpy()
+                #preds, maxvals = get_max_preds(batch_heatmaps)
+                preds = get_final_preds_using_softargmax(self.cfg, output, self.center, self.scale)
+                rospy.logdebug("Duration of get_final_preds_using_softargmax is: {}".format(rospy.Time.now().to_sec() - start_time3))
 
-                rospy.logdebug("Batch heatmaps dimensions are: {}".format(batch_heatmaps.shape))
+
+                # LPN (64 x 64), SB (88 x 88)
+                # width, height = batch_heatmaps.shape[-2], batch_heatmaps.shape[-1]
+                width, height = 64, 64
                 # Heatmap size is 88x88, so this scales predictions to image size 
                 for pred in preds[0]:
-                    pred[0] = pred[0]  * (640/88)
-                    pred[1] = pred[1]  * (480/88)
-                rospy.logdebug(str(preds[0][0][0]) + "   " + str(preds[0][0][1]))
+                    pred[0] = pred[0]  * (640/width)
+                    pred[1] = pred[1]  * (480/height)
                 
-                rospy.logdebug("Preds are: {}".format(preds))     
-                rospy.logdebug("Preds shape is: {}".format(preds.shape))
+                debug_predictions = False
+                if debug_predictions:
+                    rospy.logdebug(str(preds[0][0][0]) + "   " + str(preds[0][0][1]))                
+                    rospy.logdebug("Preds are: {}".format(preds))     
+                    rospy.logdebug("Preds shape is: {}".format(preds.shape))
                 # Preds shape is [1, 16, 2] (or num persons is first dim)
                 # rospy.loginfo("Preds shape is: {}".format(preds[0].shape))
                 
-                preds = self.filter_predictions(preds, "avg", 7)
+                preds = self.filter_predictions(preds, "avg", 3)
 
                 # Draw stickman
+                start_time5 = rospy.Time.now().to_sec()
                 stickman = HumanPoseEstimationROS.draw_stickman(pil_img, preds)
                 
                 # If compressed_stickman (zones don't work, no subscriber on compressed)
@@ -329,9 +336,9 @@ class HumanPoseEstimationROS():
                 debug_runtime = True
                 if debug_runtime:
                     rospy.loginfo("Run duration is: {}".format(duration))
-
+                
             
-            self.rate.sleep()
+            #self.rate.sleep()
 
     @staticmethod        
     def avg_list(list_data):
