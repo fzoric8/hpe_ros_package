@@ -32,7 +32,7 @@ import torchvision.transforms as transforms
 import _init_paths
 from lpn.config import cfg
 from lpn.config import update_config
-from lpn.core.inference import get_final_preds, get_max_preds, get_final_preds_using_softargmax
+from lpn.core.inference import get_final_preds, get_max_preds, get_final_preds_using_softargmax, get_predicitons
 from lpn.utils.utils import create_logger, get_model_summary
 from lpn.models.lpn import get_pose_net
 
@@ -195,8 +195,8 @@ class HumanPoseEstimationROS():
 
     def filter_predictions(self, predictions, filter_type="avg", w_size=3): 
 
-
-        preds_ = predictions[0]
+        # Different indexing between SB and LPN
+        preds_ = predictions
 
         for i, prediction in enumerate(preds_): 
             
@@ -285,19 +285,12 @@ class HumanPoseEstimationROS():
                 # Heatmaps
                 start_time3 = rospy.Time.now().to_sec()
                 # Detach basically detaches computational graph which contains gradient descent info
-                #batch_heatmaps = output.detach().numpy()
+                batch_heatmaps = output.cpu().detach().numpy()
+                #HPERos.save_heatmaps(batch_heatmaps)
                 #preds, maxvals = get_max_preds(batch_heatmaps)
-                preds = get_final_preds_using_softargmax(self.cfg, output, self.center, self.scale)
-                rospy.logdebug("Duration of get_final_preds_using_softargmax is: {}".format(rospy.Time.now().to_sec() - start_time3))
-
-
-                # LPN (64 x 64), SB (88 x 88)
-                # width, height = batch_heatmaps.shape[-2], batch_heatmaps.shape[-1]
-                width, height = 64, 64
-                # Heatmap size is 88x88, so this scales predictions to image size 
-                for pred in preds[0]:
-                    pred[0] = pred[0]  * (640/width)
-                    pred[1] = pred[1]  * (480/height)
+                preds = get_predicitons(batch_heatmaps, scaling=True)
+                #preds = get_final_preds_using_softargmax(self.cfg, output, self.center, self.scale)
+                rospy.logdebug("Duration of get_max_preds is: {}".format(rospy.Time.now().to_sec() - start_time3))
                 
                 debug_predictions = False
                 if debug_predictions:
@@ -339,6 +332,13 @@ class HumanPoseEstimationROS():
                 
             
             #self.rate.sleep()
+
+    @staticmethod
+    def save_heatmaps(heatmaps): 
+        
+        num_heatmaps = heatmaps.shape[1]
+        for i in range(num_heatmaps):
+            numpy.savetxt('/home/developer/catkin_ws/src/hpe_ros_package/heatmaps/hm_{}.csv'.format(i), heatmaps[0, i, :, :], delimiter=',')
 
     @staticmethod        
     def avg_list(list_data):

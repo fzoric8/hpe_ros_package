@@ -17,8 +17,33 @@ import math
 import numpy as np
 import torch
 import torch.nn as nn
+import time
 
 from lpn.utils.transforms import transform_preds
+
+
+def get_predicitons(batch_heatmaps, scaling=False, img_shape=(640, 480)): 
+
+    # Batch size
+    batch_size = batch_heatmaps.shape[0]
+    # Number of joints
+    num_joints = batch_heatmaps.shape[1]
+    # Heatmap shape
+    hm_w, hm_h = batch_heatmaps.shape[-2] ,batch_heatmaps.shape[-1]
+    
+    if scaling: 
+        img_w, img_h = img_shape[0], img_shape[1]
+    else:
+        img_w, img_h = hm_w, hm_h
+
+    preds = np.zeros((16, 2))
+    for i in range(num_joints): 
+        _ = np.unravel_index(batch_heatmaps[0, i, :, :].argmax(), (hm_w, hm_h))
+        # Rotate it 
+        preds[i][0] = _[1] * img_w/hm_w
+        preds[i][1] = _[0] * img_h/hm_h
+
+    return preds
 
 
 def get_max_preds(batch_heatmaps):
@@ -98,14 +123,13 @@ class SoftArgmax2D(nn.Module):
         b, c, h, w = x.shape
         device = x.device
 
-        probs = self.softmax(x.view(b, c, -1) * self.beta)
+        probs = self.softmax(x.view(b, c, -1) * self.beta).to(device)
         probs = probs.view(b, c, h, w)
-
-        self.WY = self.WY.to(device)
         self.WX = self.WX.to(device)
+        self.WY = self.WY.to(device)
 
-        px = torch.sum(probs * self.WX, dim=(2, 3))
-        py = torch.sum(probs * self.WY, dim=(2, 3))
+        px = torch.sum(probs * self.WX, dim=(2, 3)).to(device)
+        py = torch.sum(probs * self.WY, dim=(2, 3)).to(device)
         preds = torch.stack((px, py), dim=-1)
 
         # I don't use maxvals and I don't know what they do!
@@ -123,16 +147,20 @@ class SoftArgmax2D(nn.Module):
 
 def get_final_preds_using_softargmax(config, batch_heatmaps, center, scale):
     soft_argmax = SoftArgmax2D(config.MODEL.HEATMAP_SIZE[1], config.MODEL.HEATMAP_SIZE[0], beta=160)
+    start_time0 = time.time()
     coords = soft_argmax(batch_heatmaps)
+    print("Soft Argmax duration is: {}".format(time.time() - start_time0))
 
     heatmap_height = batch_heatmaps.shape[2]
     heatmap_width = batch_heatmaps.shape[3]
 
-    batch_heatmaps = batch_heatmaps.cpu().detach().numpy()
+    #batch_heatmaps = batch_heatmaps.cpu().detach().numpy()
+    start_time = time.time()
     coords = coords.cpu().detach().numpy()
-    
+    print("Coords CPU conversion is: {}".format(time.time() - start_time))
+
     # post-processing --> Not sure what this does
-    if config.TEST.POST_PROCESS:
+    if False:
         for n in range(coords.shape[0]):
             for p in range(coords.shape[1]):
                 hm = batch_heatmaps[n][p]
@@ -148,7 +176,7 @@ def get_final_preds_using_softargmax(config, batch_heatmaps, center, scale):
                     coords[n][p] += np.sign(diff) * .25
 
 
-    preds = coords.copy()
+    #preds = coords.copy()
 
     # Transform back
     #for i in range(coords.shape[0]):
@@ -156,4 +184,4 @@ def get_final_preds_using_softargmax(config, batch_heatmaps, center, scale):
     #        coords[i], center[i], scale[i], [heatmap_width, heatmap_height]
     #    )
 
-    return preds
+    return coords
