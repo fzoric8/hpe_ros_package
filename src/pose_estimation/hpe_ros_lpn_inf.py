@@ -67,14 +67,14 @@ class HumanPoseEstimationROS():
         self.model_ready = False
         self.first_img_reciv = False
         self.nn_input_formed = False
-        self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        #self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        self.device = torch.device("cpu")
 
         rospy.loginfo("[HPE-LPN] Loading model")
         self.model = self._load_model(cfg)
         rospy.loginfo("[HPE-LPN] Loaded model...")
         self.model_ready = True
 
-        print(args)
         # If use depth (use Xtion camera) 
         self.use_depth = args.use_depth
         
@@ -99,14 +99,21 @@ class HumanPoseEstimationROS():
         self.compressed_stickman = False
 
 
+        # NN transform
+        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                         std=[0.229, 0.224, 0.225])
+        self.transform = transforms.Compose([transforms.ToTensor(),
+                                        normalize])
+
+
     def _init_subscribers(self):
         
         if self.use_depth:
             # Xtion Cam
-            self.camera_sub = rospy.Subscriber("camera/rgb/image_raw", Image, self.image_cb, queue_size=1)
+            self.camera_sub = rospy.Subscriber("camera/rgb/image_raw", Image, self.image_cb, queue_size=2)
         else:
             # USB Cam
-            self.camera_sub = rospy.Subscriber("usb_camera/image_raw", Image, self.image_cb, queue_size=1)
+            self.camera_sub = rospy.Subscriber("usb_camera/image_raw", Image, self.image_cb, queue_size=2)
             
         #self.darknet_sub = rospy.Subscriber("/darknet_ros/bounding_boxes", BoundingBoxes, self.darknet_cb, queue_size=1)
 
@@ -132,7 +139,7 @@ class HumanPoseEstimationROS():
         else:
             model_state_file = os.path.join(final_output_dir,
                                         'final_state.pth.tar')
-            rospy.loginfot('=> loading model from {}'.format(model_state_file))
+            rospy.loginfo('=> loading model from {}'.format(model_state_file))
             model.load_state_dict(torch.load(model_state_file))
 
         model.to(self.device)           
@@ -155,41 +162,23 @@ class HumanPoseEstimationROS():
 
         # Transform img to numpy array        
         self.org_img = numpy.frombuffer(msg.data, dtype=numpy.uint8).reshape(msg.height, msg.width, -1)
+        self.img_w = msg.width; self.img_h = msg.height
 
-        # Normalize
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                         std=[0.229, 0.224, 0.225])
-
-        # Tensor transformations
-        transform = transforms.Compose([
-                                        transforms.ToTensor(),
-                                        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                                             std=[0.229, 0.224, 0.225])])
-        #if self.x != None and self.y != None:
-        #    self.cam_img, self.center, self.scale = self.aspect_ratio_scaler(self.org_img, self.x, self.y, self.w, self.h)
-        #else:
-        #    self.cam_img, self.center, self.scale = self.aspect_ratio_scaler(self.org_img, 0, 0, msg.width, msg.height)
-
-        self.cam_img = cv2.resize(self.org_img, dsize=(256,256), interpolation=cv2.INTER_CUBIC)
-        
-        #self.logger.info("Scale is: {}".format(self.scale))
+        self.cam_img = cv2.resize(self.org_img, dsize=(256, 256), interpolation=cv2.INTER_CUBIC)
         self.center = 256/2, 256/2
-
-        # https://github.com/microsoft/human-pose-estimation.pytorch/issues/26
-        
         # Check this scaling
         self.scale = numpy.array([1, 1], dtype=numpy.float32) 
-        
-        # Transform img to 
-        self.nn_input = transform(self.cam_img).unsqueeze(0).to(self.device)   
 
+        # Transform img to 
+        self.nn_input = self.transform(self.cam_img).unsqueeze(0).to(self.device)   
         self.nn_input_formed = True
         
         if debug_img:
             rospy.loginfo("NN_INPUT {}".format(self.nn_input))             
 
         duration = rospy.Time.now().to_sec() - start_time 
-        #rospy.loginfo("Duration of image_cb is: {}".format(duration)) # max --> 0.01s
+        
+        rospy.loginfo("Duration of image_cb is: {}".format(duration)) # max --> 0.01s
                          
   
 
@@ -257,6 +246,7 @@ class HumanPoseEstimationROS():
 
             return p_left[0], p_left[1], p_right[0], p_right[1]
             
+            
     #https://www.ros.org/news/2018/09/roscon-2017-determinism-in-ros---or-when-things-break-sometimes-and-how-to-fix-it----ingo-lutkebohle.html
     def run(self):
 
@@ -266,9 +256,10 @@ class HumanPoseEstimationROS():
             self.logger.info("LPN model for HPE not ready.")
         
         while not rospy.is_shutdown(): 
-
+            
             if (self.first_img_reciv and self.nn_input_formed):
-               
+                
+
                 start_time = rospy.Time.now().to_sec()
                 
                 # Convert ROS Image to PIL 
@@ -277,30 +268,35 @@ class HumanPoseEstimationROS():
                 rospy.logdebug("Conversion to PIL Image from numpy: {}".format(rospy.Time.now().to_sec() - start_time1))
                 
                 # Get NN Output ## TODO: Check if this could be made shorter :) 
-                rospy.logdebug(type(self.nn_input))
                 start_time2 = rospy.Time.now().to_sec()
                 output = self.model(self.nn_input) 
                 rospy.logdebug("NN inference1 duration: {}".format(rospy.Time.now().to_sec() - start_time2))
 
                 # Heatmaps
+                # torch.cuda.synchronize()
                 start_time3 = rospy.Time.now().to_sec()
                 # Detach basically detaches computational graph which contains gradient descent info
-                batch_heatmaps = output.cpu().detach().numpy()
+                batch_heatmaps = output.detach().cpu().numpy()
+                rospy.logdebug("Duration of cpu().detach().numpy() is: {}".format(rospy.Time.now().to_sec() - start_time3))
+
                 #HPERos.save_heatmaps(batch_heatmaps)
-                #preds, maxvals = get_max_preds(batch_heatmaps)
+                # preds, maxvals = get_max_preds(batch_heatmaps)
                 preds = get_predicitons(batch_heatmaps, scaling=True)
+                # Doesn't look faster
+                #self.scale = [self.img_w/64, self.img_h/64]
                 #preds = get_final_preds_using_softargmax(self.cfg, output, self.center, self.scale)
-                rospy.logdebug("Duration of get_max_preds is: {}".format(rospy.Time.now().to_sec() - start_time3))
                 
                 debug_predictions = False
                 if debug_predictions:
                     rospy.logdebug(str(preds[0][0][0]) + "   " + str(preds[0][0][1]))                
                     rospy.logdebug("Preds are: {}".format(preds))     
                     rospy.logdebug("Preds shape is: {}".format(preds.shape))
-                # Preds shape is [1, 16, 2] (or num persons is first dim)
-                # rospy.loginfo("Preds shape is: {}".format(preds[0].shape))
                 
-                preds = self.filter_predictions(preds, "avg", 3)
+                # Filtering s
+                try:
+                    preds = self.filter_predictions(preds[0], "avg", 3)
+                except Exception as e:
+                    print(e)
 
                 # Draw stickman
                 start_time5 = rospy.Time.now().to_sec()
