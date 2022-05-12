@@ -83,7 +83,6 @@ version of SimpleBaselines.
 | ResNet101   | 53M        | 12.46      |
 | ResNet152   | 68.6M      | 15.76      |
 | LPN |Params | FLOPS | 
-|-----|-|-|
 |ResNet50 |  2.9M  | 1.06 |
 |ResNet101 | 5.3M  | 1.46  |
 |ResNet152 | 7.4M  | 1.86  |
