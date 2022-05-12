@@ -63,6 +63,30 @@ Currently it's possible to use human pose estimation for generating references f
 Now we have attitude zone control which sends commands to UAV in joy msg type. 
 It's possible to easily implement position control also. 
 
+### Neural networks 
+
+Currently there are two implemented neural networks for human pose estimation. 
+One is SimpleBaselines and another one is LPN which is somewhat lightweight 
+version of SimpleBaselines. 
+
+#### Open challenges
+
+1. How to run inference in realtime? (Threading issue) 
+2. How to retrain network to have fewer GFLOPs? 
+3. How to solve stereovision problem with this? 
+
+#### LPN and SimpleBaselines comparison 
+
+| SimpleBaselines | Params | FLOPS |
+| ----------- | -----------|------------|
+| ResNet50    | 34M        | 8.96       |
+| ResNet101   | 53M        | 12.46      |
+| ResNet152   | 68.6M      | 15.76      |
+| LPN |Params | FLOPS | 
+|-----|-|-|
+|ResNet50 |  2.9M  | 1.06 |
+|ResNet101 | 5.3M  | 1.46  |
+|ResNet152 | 7.4M  | 1.86  |
 
 ### Neural networks for HPE
 
@@ -70,6 +94,8 @@ Available neural networks for HPE which are similar to SimpleBaselines are:
  - [HRNet](https://github.com/HRNet) 
  - [LPN-Simple and lightweight pose estimation](https://github.com/zhang943/lpn-pytorch) 
 
+My GPU is currently [NVIDIA GeForce MX330](https://www.techpowerup.com/gpu-specs/geforce-mx330.c3493) 
+which has 1.224 GFLOPS by specification. 
 
 
 ### TODO High priority: 
@@ -77,8 +103,8 @@ Available neural networks for HPE which are similar to SimpleBaselines are:
  - [ ] Check launch files / Add depth and control types arguments 
  - [ ] Add calibration and dynamic control to arguments in launch files
  - [ ] Finish depth control (pitch/depth control)
- - [ ] Try HRNet --> TBD (not neccesary for now)  
- - [ 
+ - [ ] Try HRNet --> Too slow for our use-case 
+
 ### TODO Low priority: 
 
  - [ ] Try 3d pose estimation 
