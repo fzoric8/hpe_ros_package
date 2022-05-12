@@ -75,6 +75,15 @@ version of SimpleBaselines.
 2. How to retrain network to have fewer GFLOPs? 
 3. How to solve stereovision problem with this? 
 
+#### TODO: 
+
+Initial ideas that could result in faster inference are: 
+
+1. Train new neural network that can take in consideration both images 
+2. Setup MLFlow on Server PC
+3. Test newly trained neural network
+
+
 #### LPN and SimpleBaselines comparison 
 
 | SimpleBaselines | Params | FLOPS |
