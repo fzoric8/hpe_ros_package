@@ -10,6 +10,7 @@ from numpy.core.fromnumeric import compress
 import rospy
 from std_msgs.msg import Float64MultiArray
 from sensor_msgs.msg import Image, CompressedImage
+from std_msgs.msg import Bool
 from data_to_images import draw_point
 from data_to_images import draw_stickman
 import cv2
@@ -42,13 +43,14 @@ from PIL import Image as PILImage
 import lpn.dataset
 import lpn.models
 
-from std_msgs.msg import Bool
+import threading
+
 
 class HumanPoseEstimationROS():
 
     def __init__(self, frequency, args):
 
-        rospy.init_node("hpe_lpn", log_level=rospy.DEBUG)
+        rospy.init_node("hpe_lpn", log_level=rospy.INFO)
         
         self.rate = rospy.Rate(int(frequency))
 
@@ -67,8 +69,9 @@ class HumanPoseEstimationROS():
         self.model_ready = False
         self.first_img_reciv = False
         self.nn_input_formed = False
-        #self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        self.device = torch.device("cpu")
+        self.nn_output_formed = False
+        self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        #self.device = torch.device("cpu")
 
         rospy.loginfo("[HPE-LPN] Loading model")
         self.model = self._load_model(cfg)
@@ -110,10 +113,11 @@ class HumanPoseEstimationROS():
         
         if self.use_depth:
             # Xtion Cam
-            self.camera_sub = rospy.Subscriber("camera/rgb/image_raw", Image, self.image_cb, queue_size=2)
+            self.camera_sub = rospy.Subscriber("camera/rgb/image_raw", Image, self.image_cb, queue_size=1)
         else:
             # USB Cam
-            self.camera_sub = rospy.Subscriber("usb_camera/image_raw", Image, self.image_cb, queue_size=2)
+            # TODO: Send as param in launch file 
+            self.camera_sub = rospy.Subscriber("usb_camera/image_raw", Image, self.image_cb, queue_size=1)
             
         #self.darknet_sub = rospy.Subscriber("/darknet_ros/bounding_boxes", BoundingBoxes, self.darknet_cb, queue_size=1)
 
@@ -142,6 +146,7 @@ class HumanPoseEstimationROS():
             rospy.loginfo('=> loading model from {}'.format(model_state_file))
             model.load_state_dict(torch.load(model_state_file))
 
+        model.eval()
         model.to(self.device)           
         
         return model
@@ -161,6 +166,7 @@ class HumanPoseEstimationROS():
             rospy.loginfo("Input shape is: {}".format(input.shape))
 
         # Transform img to numpy array        
+        start_time = rospy.Time.now().to_sec()
         self.org_img = numpy.frombuffer(msg.data, dtype=numpy.uint8).reshape(msg.height, msg.width, -1)
         self.img_w = msg.width; self.img_h = msg.height
 
@@ -171,14 +177,21 @@ class HumanPoseEstimationROS():
 
         # Transform img to 
         self.nn_input = self.transform(self.cam_img).unsqueeze(0).to(self.device)   
-        self.nn_input_formed = True
+
+        rospy.loginfo("Duration of conversion before inference is: {}".format(rospy.Time().now().to_sec() - start_time))
+        
+        # self.nn_input_formed = True
+        # Create whole pipeline in image callback to reduce neccessity for RUN method
+        output = self.model(self.nn_input)
+        self.preds = get_predicitons(output.detach().cpu().numpy(), scaling=True)
+        self.nn_output_formed = True
         
         if debug_img:
             rospy.loginfo("NN_INPUT {}".format(self.nn_input))             
 
         duration = rospy.Time.now().to_sec() - start_time 
         
-        rospy.loginfo("Duration of image_cb is: {}".format(duration)) # max --> 0.01s
+        rospy.loginfo("Duration {} of image_cb is: {}".format(threading.current_thread(), duration)) # max --> 0.01s
                          
   
 
@@ -188,7 +201,6 @@ class HumanPoseEstimationROS():
         preds_ = predictions
 
         for i, prediction in enumerate(preds_): 
-            
             # Keypoint 10 should be left wrist
             if i == 10: 
                 l_x = preds_[i][0]; l_y = preds_[i][1]; 
@@ -257,8 +269,7 @@ class HumanPoseEstimationROS():
         
         while not rospy.is_shutdown(): 
             
-            if (self.first_img_reciv and self.nn_input_formed):
-                
+            if (self.first_img_reciv and self.nn_output_formed):                
 
                 start_time = rospy.Time.now().to_sec()
                 
@@ -268,33 +279,33 @@ class HumanPoseEstimationROS():
                 rospy.logdebug("Conversion to PIL Image from numpy: {}".format(rospy.Time.now().to_sec() - start_time1))
                 
                 # Get NN Output ## TODO: Check if this could be made shorter :) 
-                start_time2 = rospy.Time.now().to_sec()
-                output = self.model(self.nn_input) 
-                rospy.logdebug("NN inference1 duration: {}".format(rospy.Time.now().to_sec() - start_time2))
+                #start_time2 = rospy.Time.now().to_sec()
+                #output = self.model(self.nn_input) 
+                #rospy.logdebug("NN inference1 duration: {}".format(rospy.Time.now().to_sec() - start_time2))
 
                 # Heatmaps
                 # torch.cuda.synchronize()
-                start_time3 = rospy.Time.now().to_sec()
+                #start_time3 = rospy.Time.now().to_sec()
                 # Detach basically detaches computational graph which contains gradient descent info
-                batch_heatmaps = output.detach().cpu().numpy()
-                rospy.logdebug("Duration of cpu().detach().numpy() is: {}".format(rospy.Time.now().to_sec() - start_time3))
+                #batch_heatmaps = output.detach().cpu().numpy()
+                #rospy.logdebug("Duration of cpu().detach().numpy() is: {}".format(rospy.Time.now().to_sec() - start_time3))
 
                 #HPERos.save_heatmaps(batch_heatmaps)
                 # preds, maxvals = get_max_preds(batch_heatmaps)
-                preds = get_predicitons(batch_heatmaps, scaling=True)
+                # preds = get_predicitons(batch_heatmaps, scaling=True)
                 # Doesn't look faster
                 #self.scale = [self.img_w/64, self.img_h/64]
                 #preds = get_final_preds_using_softargmax(self.cfg, output, self.center, self.scale)
                 
                 debug_predictions = False
                 if debug_predictions:
-                    rospy.logdebug(str(preds[0][0][0]) + "   " + str(preds[0][0][1]))                
+                    rospy.logdebug(str(preds[0][0][0]) + "  " + str(preds[0][0][1]))                
                     rospy.logdebug("Preds are: {}".format(preds))     
                     rospy.logdebug("Preds shape is: {}".format(preds.shape))
                 
                 # Filtering s
                 try:
-                    preds = self.filter_predictions(preds[0], "avg", 3)
+                    preds = self.filter_predictions(self.preds, "avg", 3)
                 except Exception as e:
                     print(e)
 
@@ -322,9 +333,9 @@ class HumanPoseEstimationROS():
                 self.pred_pub.publish(preds_ros_msg)
 
                 duration = rospy.Time.now().to_sec() - start_time
-                debug_runtime = True
+                debug_runtime = False
                 if debug_runtime:
-                    rospy.loginfo("Run duration is: {}".format(duration))
+                    rospy.loginfo("Run {} duration is: {}".format(threading.current_thread(), duration))
                 
             
             #self.rate.sleep()
@@ -420,9 +431,7 @@ def reset_config(config, args):
         config.OUTPUT_DIR = args.modelDir
     if args.modelFile: 
         config.MODEL_FILE = args.modelFile
-    #if args.modelFile: 
-    #    cfg.TEST.MODEL_FILE = os.path.join(args.modelDir, args.modelFile)
-    #    print("cfg.TEST.MODEL_FILE is: {}".format(cfg.TEST.MODEL_FILE))
+
 
 if __name__ == '__main__':
 

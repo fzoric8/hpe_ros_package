@@ -105,6 +105,9 @@ Available neural networks for HPE which are similar to SimpleBaselines are:
 My GPU is currently [NVIDIA GeForce MX330](https://www.techpowerup.com/gpu-specs/geforce-mx330.c3493) 
 which has 1.224 GFLOPS by specification. 
 
+### Current status
+
+On my PC with NVIDIA GeForce MX330, achieved inference time with LPN network is around 5Hz. 
 
 ### TODO High priority: 
 
