@@ -79,7 +79,9 @@ class HumanPoseEstimationROS():
         self.model_ready = True
 
         # If use depth (use Xtion camera) 
+        # self.use_depth = eval(str(args.use_depth))
         self.use_depth = args.use_depth
+        rospy.loginfo("[HPE-LPN] Using depth camera: {}".format(self.use_depth))
         
         # Initialize subscribers/publishers
         self._init_publishers()
@@ -178,20 +180,18 @@ class HumanPoseEstimationROS():
         # Transform img to 
         self.nn_input = self.transform(self.cam_img).unsqueeze(0).to(self.device)   
 
-        rospy.loginfo("Duration of conversion before inference is: {}".format(rospy.Time().now().to_sec() - start_time))
-        
+        #rospy.logdebug("Duration of conversion before inference is: {}".format(rospy.Time().now().to_sec() - start_time))        
         # self.nn_input_formed = True
         # Create whole pipeline in image callback to reduce neccessity for RUN method
-        output = self.model(self.nn_input)
-        self.preds = get_predicitons(output.detach().cpu().numpy(), scaling=True)
+        # output = self.model(self.nn_input)
+        # self.preds = get_predicitons(output.detach().cpu().numpy(), scaling=True)
         self.nn_output_formed = True
         
         if debug_img:
             rospy.loginfo("NN_INPUT {}".format(self.nn_input))             
 
         duration = rospy.Time.now().to_sec() - start_time 
-        
-        rospy.loginfo("Duration {} of image_cb is: {}".format(threading.current_thread(), duration)) # max --> 0.01s
+        rospy.logdebug("Duration {} of image_cb is: {}".format(threading.current_thread(), duration)) # max --> 0.01s
                          
   
 
@@ -279,20 +279,20 @@ class HumanPoseEstimationROS():
                 rospy.logdebug("Conversion to PIL Image from numpy: {}".format(rospy.Time.now().to_sec() - start_time1))
                 
                 # Get NN Output ## TODO: Check if this could be made shorter :) 
-                #start_time2 = rospy.Time.now().to_sec()
-                #output = self.model(self.nn_input) 
+                start_time2 = rospy.Time.now().to_sec()
+                output = self.model(self.nn_input) 
                 #rospy.logdebug("NN inference1 duration: {}".format(rospy.Time.now().to_sec() - start_time2))
 
                 # Heatmaps
                 # torch.cuda.synchronize()
-                #start_time3 = rospy.Time.now().to_sec()
+                start_time3 = rospy.Time.now().to_sec()
                 # Detach basically detaches computational graph which contains gradient descent info
-                #batch_heatmaps = output.detach().cpu().numpy()
+                batch_heatmaps = output.detach().cpu().numpy()
                 #rospy.logdebug("Duration of cpu().detach().numpy() is: {}".format(rospy.Time.now().to_sec() - start_time3))
 
                 #HPERos.save_heatmaps(batch_heatmaps)
                 # preds, maxvals = get_max_preds(batch_heatmaps)
-                # preds = get_predicitons(batch_heatmaps, scaling=True)
+                self.preds = get_predicitons(batch_heatmaps, scaling=True)
                 # Doesn't look faster
                 #self.scale = [self.img_w/64, self.img_h/64]
                 #preds = get_final_preds_using_softargmax(self.cfg, output, self.center, self.scale)
@@ -431,6 +431,10 @@ def reset_config(config, args):
         config.OUTPUT_DIR = args.modelDir
     if args.modelFile: 
         config.MODEL_FILE = args.modelFile
+
+# Dirty hack for correct parsing of boolean arguments wth argparse
+#def str2bool(v):
+#  return v.lower() in ("yes", "true", "t", "1")
 
 
 if __name__ == '__main__':
