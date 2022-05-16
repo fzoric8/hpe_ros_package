@@ -5,6 +5,7 @@
     <arg name="ctl_freq" value="10"/>
     <arg name="use_calibration" default="false"/>
     <arg name="control_type"    default="euler2d"/>
+    <arg name="depth_cam"       default="false"/>
 
     <!-- Launch usb_cam and HPE -->
     <include file="$(find hpe_ros_package)/launch/webcam_inference.launch"/>

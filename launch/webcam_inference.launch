@@ -2,7 +2,8 @@
 
     <arg name="frequency" default="5"/>
     <arg name="video_dev" default="/dev/video0"/>
-    <arg name="depth_cam" default="false"/>
+    <!-- TODO: Figure out how to propagate this argument to all scripts -->
+    <arg name="depth_cam" default="true"/>
     <!-- Different model loads different NN-->
     <arg name="model" default="lpn"/>    
 
