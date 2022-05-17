@@ -80,7 +80,7 @@ class HumanPoseEstimationROS():
 
         # If use depth (use Xtion camera) 
         # self.use_depth = eval(str(args.use_depth))
-        self.use_depth = args.use_depth
+        self.use_depth = eval(str(args.use_depth))
         rospy.loginfo("[HPE-LPN] Using depth camera: {}".format(self.use_depth))
         
         # Initialize subscribers/publishers
@@ -102,7 +102,6 @@ class HumanPoseEstimationROS():
 
         # If HMI integration (use compressed image)
         self.compressed_stickman = False
-
 
         # NN transform
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -315,13 +314,15 @@ class HumanPoseEstimationROS():
                 
                 # If compressed_stickman (zones don't work, no subscriber on compressed)
                 if self.compressed_stickman: 
+                    #rospy.loginfo("[HPE-LPN] Publishing compressed stickman!")
                     stickman_compressed_msg = HumanPoseEstimationROS.convert_pil_to_ros_compressed(stickman)
                     self.image_compressed_pub.publish(stickman_compressed_msg)
+                    stickman_ros_msg = HumanPoseEstimationROS.convert_pil_to_ros_img(stickman)
+                    self.image_pub.publish(stickman_ros_msg)
                 else:
                     stickman_ros_msg = HumanPoseEstimationROS.convert_pil_to_ros_img(stickman)
                     self.image_pub.publish(stickman_ros_msg)
                     
-
                 # Prepare predictions for publishing - convert to 1D float list
                 converted_preds = []
                 for pred in preds:

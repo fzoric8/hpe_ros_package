@@ -87,7 +87,7 @@ class uavController:
         # If calibration determine zone-centers
         self.start_calib = False
         # If use depth
-        self.use_depth = True
+        self.use_depth = False
         self.depth_recv = False
         self.depth_pcl_recv = False
 
@@ -130,11 +130,14 @@ class uavController:
     def _init_subscribers(self): 
 
         self.preds_sub          = rospy.Subscriber("hpe_preds", Float64MultiArray, self.pred_cb, queue_size=1)
-        self.stickman_sub       = rospy.Subscriber("stickman", Image, self.draw_zones_cb, queue_size=1)
         self.current_pose_sub   = rospy.Subscriber("uav/pose", PoseStamped, self.curr_pose_cb, queue_size=1)
         self.start_calib_sub    = rospy.Subscriber("start_calibration", Bool, self.calib_cb, queue_size=1)
         self.depth_sub          = rospy.Subscriber("camera/depth/image", Image, self.depth_cb, queue_size=1)
         self.depth_pcl_sub      = rospy.Subscriber("camera/depth/points", PointCloud2, self.depth_pcl_cb, queue_size=1)
+
+        # stickman 
+        self.stickman_sub       = rospy.Subscriber("stickman", Image, self.draw_zones_cb, queue_size=1)
+
            
     def publish_predicted_keypoints(self, rhand, lhand): 
 
@@ -161,7 +164,7 @@ class uavController:
                     # Row major indexing
                     if config == "WH": 
                         indices.append((px, py))
-                    # Columnt major indexing
+                    # Column major indexing
                     if config == "HW":
                         indices.append((py, px))
             
@@ -732,6 +735,8 @@ class uavController:
         self.start_calib_time = rospy.Time.now().to_sec()
 
     def draw_zones_cb(self, stickman_img):
+
+        rospy.logdebug("Entered stickman!")
         
         start_time = rospy.Time().now().to_sec()
         # Convert ROS Image to PIL
@@ -763,11 +768,12 @@ class uavController:
         draw.rectangle(self.roll_rect, fill=(178,34,34, 100), width=2)
 
         if self.hmi_compression: 
-            rospy.loginfo("Compressing zones")
+            rospy.loginfo("Compressing zones!")
             compressed_msg = convert_pil_to_ros_compressed(img, color_conversion="True")
             self.stickman_compressed_area_pub.publish(compressed_msg)            
 
         else:             
+            rospy.loginfo("Publishing hmi control zones!")
             ros_msg = convert_pil_to_ros_img(img) 
             self.stickman_area_pub.publish(ros_msg)
 
@@ -787,7 +793,7 @@ class uavController:
     def depth_cb(self, msg): 
         
         #self.depth_msg = numpy.frombuffer(msg.data, dtype=numpy.uint8).reshape(self.width, self.height, 4)
-        self.depth_recv = True
+        self.depth_recv = False
 
     def depth_pcl_cb(self, msg): 
 
