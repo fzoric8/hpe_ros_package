@@ -75,6 +75,7 @@ class HumanPoseEstimationROS():
         print(args)
         # If use depth (use Xtion camera) 
         self.use_depth = args.use_depth
+        self.use_depth = False
         
         # Initialize subscribers/publishers
         self._init_publishers()

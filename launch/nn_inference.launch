@@ -4,9 +4,9 @@
     <arg name="video_dev" default="/dev/video0"/>
 
     <!-- TODO: Figure out how to propagate this argument to all scripts -->
-    <arg name="depth_cam" default="true"/>
+    <arg name="depth_cam" default="false"/>
     <!-- Different model loads different NN-->
-    <arg name="model" default="lpn"/>    
+    <arg name="model" default="sb"/>    
 
     
     <group if="$(eval model == 'sb')">  

@@ -1,0 +1,14 @@
+<launch>
+
+    <arg name="video_dev" default="/dev/video0"/>
+
+    <node name="usb_camera" pkg="usb_cam" type="usb_cam_node" launch-prefix="bash -c 'sleep 5; $0 $@'" output="screen" >
+        <param name="video_device" value="$(arg video_dev)" />  
+        <param name="image_width" value="640" />
+        <param name="image_height" value="480" />
+        <param name="pixel_format" value="yuyv" />
+        <param name="camera_frame_id" value="usb_cam" />
+        <param name="io_method" value="mmap"/>
+        <param name="framerate" value="10"/>
+    </node>
+</launch>

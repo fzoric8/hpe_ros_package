@@ -4,7 +4,7 @@
     <arg name="control_type"    default="euler2d"/>
 
     <!-- send position commands using HPE -->
-    <node name="controller_node" pkg="hpe_ros_package" type="drone_controller.py" args="$(arg ctl_freq) $(arg control_type)" output="screen"/>
+    <node name="uav_control_node" pkg="hpe_ros_package" type="drone_controller.py" args="$(arg ctl_freq) $(arg control_type)" output="screen"/>
 
 
 </launch>

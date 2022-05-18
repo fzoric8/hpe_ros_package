@@ -7,24 +7,30 @@ import rospy
 import rospkg
 import sys
 import cv2
-import numpy 
+import numpy as np
+import math
 import copy
 
-from geometry_msgs.msg import Pose, PoseStamped
+from geometry_msgs.msg import Pose, PoseStamped, Vector3, Quaternion
 from std_msgs.msg import Float64MultiArray, Int32, Float32, Bool
 from sensor_msgs.msg import Image, CompressedImage, Joy, PointCloud2
+from mavros_msgs.srv import CommandBool, SetMode
+from mavros_msgs.msg import State
 import sensor_msgs.point_cloud2 as pc2
 
 from PIL import ImageDraw, ImageOps, ImageFont
 from PIL import Image as PILImage
 
 from img_utils import *
+from drone import Drone, FlightMode
+#from tasks import PreFlight
 
 # TODO:
 # - think of behavior when arm goes out of range! --> best to do nothing, just send references when there's signal from HPE 
 # - add calibration method
 # - decouple depth and zone calibration 
 # - test 2D zones
+
 
 class uavController:
 
@@ -44,6 +50,7 @@ class uavController:
 
         self._init_publishers();
         self._init_subscribers(); 
+        self._init_service_proxys(); 
 
         # Define zones / dependent on input video image (Can be extracted from camera_info) 
         self.height = 480; 
@@ -102,7 +109,20 @@ class uavController:
         # Flags for run method
         self.initialized = True
         self.prediction_started = False
+        self.first_position_ctl = True
 
+        # EPFL 
+        self.yaw_cmd    = 0; 
+        self.height_cmd = 0; 
+        self.roll_cmd   = 0; 
+        self.pitch_cmd  = 0; 
+        self.pose_cmd = PoseStamped()
+        self.current_pose = PoseStamped()
+        init_position = Vector3(0,0,0)
+        init_orientation = Quaternion(0, 0, 0, 1)
+        self.current_pose.pose.position = init_position
+        self.current_pose.pose.orientation = init_orientation
+        self.drone = Drone("drone_1", False, True, 'local')
         rospy.loginfo("Initialized!")   
 
     def _init_publishers(self): 
@@ -127,17 +147,29 @@ class uavController:
         self.d_shoulder_pub = rospy.Publisher("hpe/d_shoulder", Float32, queue_size=1)
         self.d_relative_pub = rospy.Publisher("hpe/d_relative", Float32, queue_size=1)
 
+        # EPFL PUB
+        #self.pose_cmd_pub = rospy.Publisher("/drone_1/mavros/setpoint_position/local", PoseStamped, queue_size=1)
+
     def _init_subscribers(self): 
 
         self.preds_sub          = rospy.Subscriber("hpe_preds", Float64MultiArray, self.pred_cb, queue_size=1)
-        self.current_pose_sub   = rospy.Subscriber("uav/pose", PoseStamped, self.curr_pose_cb, queue_size=1)
-        self.start_calib_sub    = rospy.Subscriber("start_calibration", Bool, self.calib_cb, queue_size=1)
-        self.depth_sub          = rospy.Subscriber("camera/depth/image", Image, self.depth_cb, queue_size=1)
-        self.depth_pcl_sub      = rospy.Subscriber("camera/depth/points", PointCloud2, self.depth_pcl_cb, queue_size=1)
+
+        # TODO: Add current pose from PX4
+        # /ns/mavros/position_src/pose
+        # position_src -> loca_position or vision_pose
+        self.current_pose_sub   = rospy.Subscriber("/drone_1/mavros/local_position/pose", PoseStamped, self.curr_pose_cb, queue_size=1)
 
         # stickman 
         self.stickman_sub       = rospy.Subscriber("stickman", Image, self.draw_zones_cb, queue_size=1)
+        
+        # Add mavros state sub
+        # self.uav_state_sub = rospy.Subscriber("drone_1/mavros/state", State, self.uav_state_cb)
 
+    def _init_service_proxys(self): 
+
+        # Services
+        self.arming_client = rospy.ServiceProxy('drone_1/mavros/cmd/arming', CommandBool)
+        self.set_mode_client = rospy.ServiceProxy('drone1/mavros/set_mode', SetMode)
            
     def publish_predicted_keypoints(self, rhand, lhand): 
 
@@ -151,45 +183,6 @@ class uavController:
         self.lhand_y_pub.publish(int(lhand_y))
         self.rhand_x_pub.publish(int(rhand_x))
         self.rhand_y_pub.publish(int(rhand_y))
-
-    def average_depth_cluster(self, px, py, k, config="WH"): 
-
-        indices = []
-        start_px = int(px - k); stop_px = int(px + k); 
-        start_py = int(py - k); stop_py = int(py + k); 
-
-        # Paired indices
-        for px in range(start_px, stop_px, 1): 
-                for py in range(start_py, stop_py, 1): 
-                    # Row major indexing
-                    if config == "WH": 
-                        indices.append((px, py))
-                    # Column major indexing
-                    if config == "HW":
-                        indices.append((py, px))
-            
-        # Fastest method for fetching specific indices!
-        depths = pc2.read_points(self.depth_pcl_msg, ['z'], False, uvs=indices)
-        
-        try:
-
-            depths = numpy.array(list(depths), dtype=numpy.float32)
-            depth_no_nans = list(depths[~numpy.isnan(depths)])
-
-            if len(depth_no_nans) > 0:                
-                
-                avg_depth = sum(depth_no_nans) / len(depth_no_nans)
-                rospy.logdebug("{} Average depth is: {}".format(config, avg_depth))
-                return avg_depth
-
-            else: 
-
-                return None
-        
-        except Exception as e:
-            rospy.logwarn("Exception occured: {}".format(str(e))) 
-            
-            return None
 
     def define_ctl_zones(self, img_width, img_height, edge_offset, rect_width):
         
@@ -326,32 +319,42 @@ class uavController:
 
         return joy_msg
 
-    def run_position_ctl(self, lhand, rhand):
+    def run_2d_position_ctl(self):
 
-        # Convert predictions into drone positions. Goes from [1, movement_available]
-        # NOTE: image is mirrored, so left control area in preds corresponds to the right hand movements 
-        pose_cmd = Pose()        
-        if self.recv_pose_meas and not self.start_position_ctl:
-            rospy.logdebug("Setting up initial value!")
-            pose_cmd.position.x = self.current_pose.pose.position.x
-            pose_cmd.position.y = self.current_pose.pose.position.y
-            pose_cmd.position.z = self.current_pose.pose.position.z
-            pose_cmd.orientation.z = self.current_pose.pose.orientation.z
+        if self.first_position_ctl:
+            self.pose_cmd.pose.position.x = self.current_pose.pose.position.x 
+            self.pose_cmd.pose.position.y = self.current_pose.pose.position.y
+            self.pose_cmd.pose.position.z = self.current_pose.pose.position.z 
+            self.pose_cmd.pose.orientation = self.current_pose.pose.orientation
 
-        elif self.recv_pose_meas and self.start_position_ctl: 
-            try:
-                pose_cmd = self.prev_pose_cmd  # Doesn't exist in the situation where we've started the algorithm however, never entered some of the zones!
-            except:
-                pose_cmd.position = self.current_pose.pose.position
-                pose_cmd.orientation = self.current_pose.pose.orientation
+            qx = self.current_pose.pose.orientation.x
+            qy = self.current_pose.pose.orientation.y 
+            qz = self.current_pose.pose.orientation.z 
+            qw = self.current_pose.pose.orientation.w 
+
+            roll, pitch, self.yaw = quat_to_eul_conv(qx, qy, qz, qw)
+
+        else:
+            
+            yaw = self.yaw
+            s_ = 0.01; 
+            yaw = yaw + self.yaw_cmd * s_ * 5; self.yaw = yaw
+            x_ = self.roll_cmd * s_* np.sin(yaw) - self.pitch_cmd * s_ * np.cos(yaw)
+            y_ = self.pitch_cmd * s_ * np.sin(yaw) + self.roll_cmd * s_ * np.cos(yaw)
+
+            # Dummy check to prevent unwanted reference jumps
+            if x_ > 0.1: x_ = 0; 
+            if y_ > 0.1: y_ = 0;
         
-        increase = 0.03; decrease = 0.03; 
+            self.pose_cmd.pose.position.x += x_; 
+            self.pose_cmd.pose.position.y += y_; 
+            self.pose_cmd.pose.position.z += self.height_cmd * s_; 
+            qw_, qx_, qy_, qz_ = toQuaternion(yaw, 0, 0)
+            self.pose_cmd.pose.orientation.x = qx_; self.pose_cmd.pose.orientation.y = qy_; 
+            self.pose_cmd.pose.orientation.z = qz_; self.pose_cmd.pose.orientation.w = qw_; 
         
-        if self.start_position_ctl:
-            self.changed_cmd = False
-            # Current predictions
-            rospy.logdebug("Left hand: {}".format(lhand))
-            rospy.logdebug("Right hand: {}".format(rhand))
+        #self.pose_cmd_pub.publish(self.pose_cmd)
+        self.first_position_ctl = False
             
     # TODO: Implement position change in same way it has been implemented for joy control     
     def run_joy_ctl(self, lhand, rhand): 
@@ -407,7 +410,6 @@ class uavController:
 
         return ctl_rect 
 
-    # TODO: Fix this part!
     def define_2d_ctl_zones(self, l_zone, r_zone, deadzone): 
 
         cx1, cy1 = (l_zone[0][0] + l_zone[1][0])/2, (l_zone[0][1] + l_zone[1][1])/2
@@ -436,15 +438,15 @@ class uavController:
         x1, y1 = rect[1][0], rect[1][1]
         cx, cy = (x1 + x0) / 2, (y1 + y0) / 2
 
-        rospy.logdebug("x0: {}\t x1: {}".format(x0, x1))
-        rospy.logdebug("y0: {}\t y1: {}".format(y0, y1))
-        rospy.logdebug("cx: {}".format(cx))
-        rospy.logdebug("cy: {}".format(cy))
+        #rospy.logdebug("x0: {}\t x1: {}".format(x0, x1))
+        #rospy.logdebug("y0: {}\t y1: {}".format(y0, y1))
+        #rospy.logdebug("cx: {}".format(cx))
+        #rospy.logdebug("cy: {}".format(cy))
         
         if self.in_zone(point, rect): 
             
-            rospy.logdebug("x: {}".format(x))
-            rospy.logdebug("y: {}".format(y))
+            #rospy.logdebug("x: {}".format(x))
+            #rospy.logdebug("y: {}".format(y))
 
             if abs(cx - x) > deadzone: 
                 norm_x_diff = (x - cx) / ((x1 - x0) / 2)
@@ -472,14 +474,20 @@ class uavController:
         reverse = True 
         if reverse: 
             height_cmd *= reverse_dir
-            yaw_cmd *= reverse_dir
-            pitch_cmd *= reverse_dir
+            #yaw_cmd *= reverse_dir
+            #pitch_cmd  *= reverse_dir
 
         # Test!
         rospy.logdebug("Height cmd: {}".format(height_cmd))
         rospy.logdebug("Yaw cmd: {}".format(yaw_cmd))
         rospy.logdebug("Pitch cmd: {}".format(pitch_cmd))
         rospy.logdebug("Roll cmd: {}".format(roll_cmd))
+
+        # Set new commands into class_variable 
+        self.height_cmd = height_cmd
+        self.yaw_cmd = yaw_cmd
+        self.pitch_cmd = pitch_cmd
+        self.roll_cmd = roll_cmd
 
         # Compose from commands joy msg
         joy_msg = self.compose_joy_msg(pitch_cmd, roll_cmd, yaw_cmd, height_cmd)
@@ -530,51 +538,6 @@ class uavController:
 
             return avg_rhand, avg_lhand
 
-    def average_zone_points(self, rshoulder, lshoulder, avg_len): 
-
-        self.rshoulder_px.append(rshoulder[0]); self.rshoulder_py.append(rshoulder[1])
-        self.lshoulder_px.append(lshoulder[0]); self.lshoulder_py.append(lshoulder[1])
-
-        if len(self.rshoulder_px) > avg_len: 
-            avg_rshoulder_px = int(sum(self.rshoulder_px[-avg_len:])/len(self.rshoulder_px[-avg_len:]))
-            avg_rshoulder_py = int(sum(self.rshoulder_py[-avg_len:])/len(self.rshoulder_py[-avg_len:]))
-            avg_lshoulder_px = int(sum(self.lshoulder_px[-avg_len:])/len(self.lshoulder_px[-avg_len:]))
-            avg_lshoulder_py = int(sum(self.lshoulder_py[-avg_len:])/len(self.lshoulder_py[-avg_len:]))
-        else: 
-            avg_rshoulder_px = int(sum(self.rshoulder_px)/len(self.rshoulder_px))
-            avg_rshoulder_py = int(sum(self.rshoulder_py)/len(self.rshoulder_py))
-            avg_lshoulder_px = int(sum(self.lshoulder_px)/len(self.lshoulder_px))
-            avg_lshoulder_py = int(sum(self.lshoulder_py)/len(self.lshoulder_py))
-
-        return ((avg_rshoulder_px, avg_rshoulder_py), (avg_lshoulder_px, avg_lshoulder_py))
-
-    def depth_minmax_calib(self, collected_data): 
-         
-        min_data = min(collected_data)
-        max_data = max(collected_data)
-        data_range = max_data - min_data
-
-        return min_data, max_data, data_range
-
-    def depth_avg_calib(self, collected_data): 
-                     
-        avg = sum(collected_data)/len(collected_data)
-
-        return avg
-
-    def depth_data_collection(self, px, py, done=False):
-
-        if not done:
-            depth = self.average_depth_cluster(px, py, 2, "WH")
-            if depth: 
-                self.calib_depth.append(depth)
-        else: 
-
-            #avg_depth  = sum(self.calib_depth) / len(self.calib_depth)
-            
-            # Return collected data
-            return self.calib_depth
-
     def create_float32_msg(self, value):
 
         msg = Float32()
@@ -600,38 +563,6 @@ class uavController:
                 lshoulder_ = (abs(self.lshoulder[0] - self.width), self.lshoulder[1])
                 rshoulder_ = (abs(self.rshoulder[0] - self.width), self.rshoulder[1])
 
-                # ========================================================
-                # ===================== Calibration ======================
-                if self.start_calib:
-                    
-                    duration = rospy.Time.now().to_sec() - self.start_calib_time
-                    if duration < self.calib_duration: 
-                        # Disable control during execution  
-                        self.control_type = "None"  
-                        self.zones_calibration(rhand_, lhand_, done=False)
-                        self.depth_data_collection(self.rhand[0], self.rhand[1], done=False)
-                    
-                    else:                        
-                        calib_points = self.zones_calibration(rhand_, lhand_, done=True)
-                        depth_calib_data = self.depth_data_collection(self.rhand[0], self.rhand[1], done=True)
-                        self.height_rect, self.yaw_rect, self.pitch_rect, self.roll_rect =  self.define_calibrated_ctl_zones(calib_points, self.width, self.height)
-                        self.l_deadzone = self.define_deadzones(self.height_rect, self.yaw_rect)
-                        self.r_deadzone = self.define_deadzones(self.pitch_rect, self.roll_rect)
-                        self.control_type = self.init_control_type 
-                        self.start_calib = False
-
-                # Move zones based on current shoulder
-                dynamic = False
-                if dynamic:                         
-                    calib_points = self.average_zone_points(rshoulder_, lshoulder_, 10)
-                    self.r_zone = self.define_ctl_zone(self.ctl_width, self.ctl_height, calib_points[0][0], calib_points[0][1])
-                    self.l_zone = self.define_ctl_zone(self.ctl_width, self.ctl_height, calib_points[1][0], calib_points[1][1])
-                    self.height_rect, self.yaw_rect, self.pitch_rect, self.roll_rect =  self.define_calibrated_ctl_zones(calib_points, self.width, self.height)
-                    self.l_deadzone = self.define_deadzones(self.height_rect, self.yaw_rect)
-                    self.r_deadzone = self.define_deadzones(self.pitch_rect, self.roll_rect)                    
-                    rospy.logdebug("l_deadzone: {}".format(self.l_deadzone))
-                    rospy.logdebug("r_deadzone: {}".format(self.r_deadzone))
-
                 # ====================== Execution ========================
                 if self.control_type == "position": 
 
@@ -647,53 +578,42 @@ class uavController:
                     if self.start_joy_ctl:
                         self.run_joy_ctl(lhand_, rhand_)
 
-                if self.control_type == "euler2d":                    
-                    
-                    # Use depth information (decouple it!)
-                    if self.depth_recv:
-                        # Using self.rhand and rhand_[1] because self.rhand is not mirrored (which makes it okay for depth!)
-                        current_wrist_depth = self.average_depth_cluster(self.rhand[0], rhand_[1], 2, "WH")
-                        current_r_shoulder_depth = self.average_depth_cluster(self.rshoulder[0], self.rshoulder[1], 2, "WH")
-                        ros_wrist_depth = self.create_float32_msg(current_wrist_depth)
-                        ros_shoulder_depth = self.create_float32_msg(current_r_shoulder_depth)
-                        # Publish wrist and shoulder depth
-                        self.d_wrist_pub.publish(ros_wrist_depth)
-                        self.d_shoulder_pub.publish(ros_shoulder_depth)
-
-                        try: 
-                            dist = current_r_shoulder_depth - current_wrist_depth
-                            self.relative_dist = dist
-                            ros_relative_depth = self.create_float32_msg(dist)
-                            # Publish relative wrist and shoulder depth
-                            self.d_relative_pub.publish(ros_relative_depth)
-
-                            rospy.logdebug("Current relative distance is: {}".format(dist))
-                        except Exception as e:
-                            rospy.logwarn("Exception is: {}".format(str(e)))                     
+                if self.control_type == "euler2d":                                 
                         
                     if self.in_zone(lhand_, self.l_deadzone) and self.in_zone(rhand_, self.r_deadzone):
-                        self.start_joy2d_ctl = True 
+                        
+                        t0 = rospy.get_time()
+                        while self.drone.alive:
+                            self.drone.set_target_pose(self.current_pose)
+                            self.drone.set_mode(FlightMode.Offboard)
+                            self.drone.arm()
+                            self.drone.sleep()                    
+
+                            if self.drone.armed and self.drone.mode == FlightMode.Offboard.value:
+                                self.start_joy2d_ctl = True 
+                                break    
+
+                            if rospy.get_time() - t0 >= 15:
+                                rospy.logerr('Preflight timeout, quitting...')
+                                if self.drone.armed:
+                                    self.drone.disarm()
+                                rospy.signal_shutdown('Preflight timeout')
+                                sys.exit(1)
+                        
                     else:
-                        rospy.loginfo("Not in deadzones!")        
+
+                        rospy.logdebug("Arms are not in control zones!")                         
                     
                     if self.start_joy2d_ctl: 
-                        # Normal joy2d
-                        # self.run_joy2d_ctl(lhand_, rhand_)
-                        # Depth joy2d
-                        #rospy.loginfo("Current depth is: {}".format(dist))
-                        n_depth = 4
-                        # =============== Calibration ===============
-                        # Depth averaging --> move to another method
-                        #if dist:
-                        #    self.calib_depth.append(current_depth)
-                        #    current_depth = sum(self.calib_depth[-n_depth:])/len(self.calib_depth[-n_depth:])                            
-                        #else: 
-                        #    current_depth = sum(self.calib_depth[-n_depth:])/len(self.calib_depth[-n_depth:])
-
                         self.run_joy2d_ctl(lhand_, rhand_)
+                        self.run_2d_position_ctl()
+                        self.drone.set_target_pose(self.pose_cmd)
+
+                        # Add stuff for sending referencess
+
+                        # Publish new pose
 
                 self.rate.sleep()
-
 
     def curr_pose_cb(self, msg):
         
@@ -728,15 +648,10 @@ class uavController:
         if self.inspect_keypoints:  
             self.publish_predicted_keypoints(self.rhand, self.lhand)
 
-    def calib_cb(self, msg): 
-        
-        self.start_calib = msg.data
-
-        self.start_calib_time = rospy.Time.now().to_sec()
 
     def draw_zones_cb(self, stickman_img):
 
-        rospy.logdebug("Entered stickman!")
+        #rospy.logdebug("Entered stickman!")
         
         start_time = rospy.Time().now().to_sec()
         # Convert ROS Image to PIL
@@ -773,7 +688,7 @@ class uavController:
             self.stickman_compressed_area_pub.publish(compressed_msg)            
 
         else:             
-            rospy.loginfo("Publishing hmi control zones!")
+            #rospy.loginfo("Publishing hmi control zones!")
             ros_msg = convert_pil_to_ros_img(img) 
             self.stickman_area_pub.publish(ros_msg)
 
@@ -790,18 +705,46 @@ class uavController:
         
         duration = rospy.Time().now().to_sec() - start_time
 
-    def depth_cb(self, msg): 
-        
-        #self.depth_msg = numpy.frombuffer(msg.data, dtype=numpy.uint8).reshape(self.width, self.height, 4)
-        self.depth_recv = False
+def quat_to_eul_conv( qx, qy, qz, qw):
+    """
+    Convert quaternions to euler angles (roll, pitch, yaw)
+    """
 
-    def depth_pcl_cb(self, msg): 
+    # roll (x-axis rotation)
+    sinr = 2. * (qw * qx +  qy * qz)
+    cosr = 1. - 2. * (qx * qx + qy * qy)
+    roll = math.atan2(sinr, cosr)
 
-        #https://answers.ros.org/question/191265/pointcloud2-access-data/
+    # pitch (y-axis rotation)
+    sinp = 2. * (qw * qy - qz * qx)
+    sinp = 1. if sinp > 1. else sinp
+    sinp = -1. if sinp < -1. else sinp
+    pitch = math.asin(sinp)
 
-        self.depth_pcl_recv = True
-        self.depth_pcl_msg = PointCloud2()
-        self.depth_pcl_msg = msg
+    # yaw (z-axis rotation)
+    siny = 2. * (qw * qz + qx * qy)
+    cosy = 1 - 2. * (qy * qy + qz * qz)
+    yaw = math.atan2(siny, cosy)
+
+    return roll, pitch, yaw
+
+def toQuaternion(yaw, pitch,  roll):
+
+    cy = math.cos(yaw * 0.5);
+    sy = math.sin(yaw * 0.5);
+    cp = math.cos(pitch * 0.5);
+    sp = math.sin(pitch * 0.5);
+    cr = math.cos(roll * 0.5);
+    sr = math.sin(roll * 0.5);
+
+    qw = cr * cp * cy + sr * sp * sy;
+    qx = sr * cp * cy - cr * sp * sy;
+    qy = cr * sp * cy + sr * cp * sy;
+    qz = cr * cp * sy - sr * sp * cy;
+
+    return qw, qx, qy, qz
+
+
    
 def str2bool(v):
   return v.lower() in ("yes", "true", "t", "1")
