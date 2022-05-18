@@ -109,7 +109,6 @@ class HumanPoseEstimationROS():
         self.transform = transforms.Compose([transforms.ToTensor(),
                                         normalize])
 
-
     def _init_subscribers(self):
         
         if self.use_depth:
@@ -319,6 +318,7 @@ class HumanPoseEstimationROS():
                     self.image_compressed_pub.publish(stickman_compressed_msg)
                     stickman_ros_msg = HumanPoseEstimationROS.convert_pil_to_ros_img(stickman)
                     self.image_pub.publish(stickman_ros_msg)
+
                 else:
                     stickman_ros_msg = HumanPoseEstimationROS.convert_pil_to_ros_img(stickman)
                     self.image_pub.publish(stickman_ros_msg)
@@ -338,8 +338,7 @@ class HumanPoseEstimationROS():
                 if debug_runtime:
                     rospy.loginfo("Run {} duration is: {}".format(threading.current_thread(), duration))
                 
-            
-            #self.rate.sleep()
+                        #self.rate.sleep()
 
     @staticmethod
     def save_heatmaps(heatmaps): 
