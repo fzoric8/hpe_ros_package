@@ -342,8 +342,8 @@ class uavController:
             yaw = self.yaw
             s_ = 0.02; 
             yaw = yaw + self.yaw_cmd * s_ * 2.5; self.yaw = yaw
-            x_ = self.roll_cmd * s_* np.sin(yaw) - self.pitch_cmd * s_ * np.cos(yaw)
-            y_ = self.pitch_cmd * s_ * np.sin(yaw) + self.roll_cmd * s_ * np.cos(yaw)
+            x_ =  self.pitch_cmd * s_ * np.cos(yaw) - self.roll_cmd * s_ * np.sin(yaw)
+            y_ =  self.pitch_cmd * s_ * np.sin(yaw) + self.roll_cmd * s_ * np.cos(yaw)
 
             # Dummy check to prevent unwanted reference jumps
             if x_ > 0.1: x_ = 0; 
@@ -357,11 +357,12 @@ class uavController:
             self.pose_cmd.pose.orientation.x = qx_; self.pose_cmd.pose.orientation.y = qy_; 
             self.pose_cmd.pose.orientation.z = qz_; self.pose_cmd.pose.orientation.w = qw_; 
 
-            debug = False
+            debug = True
             if debug:
                 rospy.logdebug("X: {}".format(self.pose_cmd.pose.position.x))
                 rospy.logdebug("Y: {}".format(self.pose_cmd.pose.position.y))
                 rospy.logdebug("Z: {}".format(self.pose_cmd.pose.position.z))
+                rospy.logdebug("Yaw: {}".format(yaw))
             
         
         #self.pose_cmd_pub.publish(self.pose_cmd)
@@ -485,8 +486,9 @@ class uavController:
         reverse = True 
         if reverse: 
             height_cmd *= reverse_dir
-            #yaw_cmd *= reverse_dir
-            #pitch_cmd  *= reverse_dir
+            roll_cmd *= reverse_dir
+            yaw_cmd *= reverse_dir
+            pitch_cmd  *= reverse_dir
 
         # Test!
         rospy.logdebug("Height cmd: {}".format(height_cmd))
@@ -523,7 +525,7 @@ class uavController:
             roll_cmd  *= reverse_dir
 
         # Test!
-        debug_joy = True
+        debug_joy = False
         if debug_joy:
             rospy.logdebug("Height cmd: {}".format(height_cmd))
             rospy.logdebug("Yaw cmd: {}".format(yaw_cmd))
@@ -595,9 +597,10 @@ class uavController:
                     if self.in_zone(lhand_, self.l_deadzone) and self.in_zone(rhand_, self.r_deadzone) :
                         
                         t0 = rospy.get_time()
+                        self.start_joy2d_ctl = True
 
                         # This should stop sending reference to UAV based on current position read
-                        #self.drone.set_target_pose(self.current_pose)
+                        self.drone.set_target_pose(self.current_pose)
                         
                         while (self.drone.alive and self.first_position_ctl):
                             self.drone.set_target_pose(self.current_pose)
@@ -625,8 +628,6 @@ class uavController:
                         self.run_2d_position_ctl()
                         # Publish directly to topic? 
                         self.drone.set_target_pose(self.pose_cmd)
-
-                        # Add stuff for sending referencess
 
                         # Publish new pose
 
