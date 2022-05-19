@@ -322,23 +322,26 @@ class uavController:
     def run_2d_position_ctl(self):
 
         if self.first_position_ctl:
-            self.pose_cmd.pose.position.x = self.current_pose.pose.position.x 
-            self.pose_cmd.pose.position.y = self.current_pose.pose.position.y
-            self.pose_cmd.pose.position.z = self.current_pose.pose.position.z 
-            self.pose_cmd.pose.orientation = self.current_pose.pose.orientation
 
-            qx = self.current_pose.pose.orientation.x
-            qy = self.current_pose.pose.orientation.y 
-            qz = self.current_pose.pose.orientation.z 
-            qw = self.current_pose.pose.orientation.w 
+            self.pose_cmd.pose.position.x = copy.deepcopy(self.current_pose.pose.position.x) 
+            self.pose_cmd.pose.position.y = copy.deepcopy(self.current_pose.pose.position.y)
+            self.pose_cmd.pose.position.z = copy.deepcopy(self.current_pose.pose.position.z) 
+            self.pose_cmd.pose.orientation = copy.deepcopy(self.current_pose.pose.orientation)
+
+            qx = copy.deepcopy(self.current_pose.pose.orientation.x)
+            qy = copy.deepcopy(self.current_pose.pose.orientation.y)
+            qz = copy.deepcopy(self.current_pose.pose.orientation.z) 
+            qw = copy.deepcopy(self.current_pose.pose.orientation.w)
 
             roll, pitch, self.yaw = quat_to_eul_conv(qx, qy, qz, qw)
+
+            self.first_position_ctl = False
 
         else:
             
             yaw = self.yaw
-            s_ = 0.01; 
-            yaw = yaw + self.yaw_cmd * s_ * 5; self.yaw = yaw
+            s_ = 0.02; 
+            yaw = yaw + self.yaw_cmd * s_ * 2.5; self.yaw = yaw
             x_ = self.roll_cmd * s_* np.sin(yaw) - self.pitch_cmd * s_ * np.cos(yaw)
             y_ = self.pitch_cmd * s_ * np.sin(yaw) + self.roll_cmd * s_ * np.cos(yaw)
 
@@ -348,13 +351,21 @@ class uavController:
         
             self.pose_cmd.pose.position.x += x_; 
             self.pose_cmd.pose.position.y += y_; 
-            self.pose_cmd.pose.position.z += self.height_cmd * s_; 
+            s_h = 0.02; 
+            self.pose_cmd.pose.position.z += self.height_cmd * s_h; 
             qw_, qx_, qy_, qz_ = toQuaternion(yaw, 0, 0)
             self.pose_cmd.pose.orientation.x = qx_; self.pose_cmd.pose.orientation.y = qy_; 
             self.pose_cmd.pose.orientation.z = qz_; self.pose_cmd.pose.orientation.w = qw_; 
+
+            debug = False
+            if debug:
+                rospy.logdebug("X: {}".format(self.pose_cmd.pose.position.x))
+                rospy.logdebug("Y: {}".format(self.pose_cmd.pose.position.y))
+                rospy.logdebug("Z: {}".format(self.pose_cmd.pose.position.z))
+            
         
         #self.pose_cmd_pub.publish(self.pose_cmd)
-        self.first_position_ctl = False
+        
             
     # TODO: Implement position change in same way it has been implemented for joy control     
     def run_joy_ctl(self, lhand, rhand): 
@@ -580,10 +591,15 @@ class uavController:
 
                 if self.control_type == "euler2d":                                 
                         
-                    if self.in_zone(lhand_, self.l_deadzone) and self.in_zone(rhand_, self.r_deadzone):
+                    # First pass condition?
+                    if self.in_zone(lhand_, self.l_deadzone) and self.in_zone(rhand_, self.r_deadzone) :
                         
                         t0 = rospy.get_time()
-                        while self.drone.alive:
+
+                        # This should stop sending reference to UAV based on current position read
+                        #self.drone.set_target_pose(self.current_pose)
+                        
+                        while (self.drone.alive and self.first_position_ctl):
                             self.drone.set_target_pose(self.current_pose)
                             self.drone.set_mode(FlightMode.Offboard)
                             self.drone.arm()
@@ -607,6 +623,7 @@ class uavController:
                     if self.start_joy2d_ctl: 
                         self.run_joy2d_ctl(lhand_, rhand_)
                         self.run_2d_position_ctl()
+                        # Publish directly to topic? 
                         self.drone.set_target_pose(self.pose_cmd)
 
                         # Add stuff for sending referencess
