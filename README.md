@@ -103,11 +103,37 @@ Available neural networks for HPE which are similar to SimpleBaselines are:
  - [LPN-Simple and lightweight pose estimation](https://github.com/zhang943/lpn-pytorch) 
 
 My GPU is currently [NVIDIA GeForce MX330](https://www.techpowerup.com/gpu-specs/geforce-mx330.c3493) 
-which has 1.224 GFLOPS by specification. 
+which has 1.224 GFLOPS by specification. GPU like GTX 1050 works much much better. 
 
 ### Current status
 
 On my PC with NVIDIA GeForce MX330, achieved inference time with LPN network is around 5Hz. 
+
+### EPFL-visit
+
+#### What was done: 
+
+ - [x] Setup FKIE on 4 PCs (my, goran, rPi and jetson(UAV))
+ - [x] Setup FLIR camera on UAV 
+ - [x] Setup network for PCs
+ - [x] Setup everything for human pose estimation on new PC
+ - [x] Tested new network (really bad), tested old network (good on different PC) 
+ - [x] Tested drawing on rPi with multiple RTSP streams (quite slow)
+ - [x] Reinstalled linux on raspberry Pi (became corrupted after shutting down) 
+ - [x] Decoupled launch files in HPE
+ - [x] Tested voice control for setting up opening/closing of wings 
+ - [x] Created tmux-experimental environment 
+ - [x] Used shell scripts in tmux experimental environment
+ - [x] Flown with morphing UAV (sending position commands over multimaster to UAV)
+ - [x] Fixed position commands from drone_controller
+ - [x] Pruned drone controller and added simple PixHawk stuff on it 
+ - [x] Swapped camera during testing
+
+#### What needs to be done: 
+ 
+ - [x] Code review on `drone_controller.py`/split modules and generate cfg files etc..
+ - [x] Check how to improve voice control Å
+ - [x] Test how to make wmctrl to override and reconfigure window size on PC            
 
 ### TODO High priority: 
 
