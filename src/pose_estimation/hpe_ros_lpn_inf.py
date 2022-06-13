@@ -50,7 +50,7 @@ class HumanPoseEstimationROS():
 
     def __init__(self, frequency, args):
 
-        rospy.init_node("hpe_lpn", log_level=rospy.INFO)
+        rospy.init_node("hpe_lpn", log_level=rospy.DEBUG)
         
         self.rate = rospy.Rate(int(frequency))
 
@@ -80,7 +80,8 @@ class HumanPoseEstimationROS():
 
         # If use depth (use Xtion camera) 
         # self.use_depth = eval(str(args.use_depth))
-        self.use_depth = args.use_depth
+        self.use_depth = eval(str(args.use_depth))
+        self.use_depth = False 
         rospy.loginfo("[HPE-LPN] Using depth camera: {}".format(self.use_depth))
         
         # Initialize subscribers/publishers
@@ -108,7 +109,7 @@ class HumanPoseEstimationROS():
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
         self.transform = transforms.Compose([transforms.ToTensor(),
-                                        normalize])
+                                            normalize])
 
 
     def _init_subscribers(self):
@@ -153,7 +154,6 @@ class HumanPoseEstimationROS():
         
         return model
 
-
     def image_cb(self, msg):
 
         start_time = rospy.Time.now().to_sec()
@@ -191,10 +191,8 @@ class HumanPoseEstimationROS():
             rospy.loginfo("NN_INPUT {}".format(self.nn_input))             
 
         duration = rospy.Time.now().to_sec() - start_time 
-        rospy.logdebug("Duration {} of image_cb is: {}".format(threading.current_thread(), duration)) # max --> 0.01s
-                         
+        rospy.logdebug("Duration {} of image_cb is: {}".format(threading.current_thread(), duration)) # max --> 0.01s                   
   
-
     def filter_predictions(self, predictions, filter_type="avg", w_size=3): 
 
         # Different indexing between SB and LPN
@@ -256,8 +254,7 @@ class HumanPoseEstimationROS():
 
         else: 
 
-            return p_left[0], p_left[1], p_right[0], p_right[1]
-            
+            return p_left[0], p_left[1], p_right[0], p_right[1]       
             
     #https://www.ros.org/news/2018/09/roscon-2017-determinism-in-ros---or-when-things-break-sometimes-and-how-to-fix-it----ingo-lutkebohle.html
     def run(self):
@@ -435,7 +432,6 @@ def reset_config(config, args):
 # Dirty hack for correct parsing of boolean arguments wth argparse
 #def str2bool(v):
 #  return v.lower() in ("yes", "true", "t", "1")
-
 
 if __name__ == '__main__':
 
