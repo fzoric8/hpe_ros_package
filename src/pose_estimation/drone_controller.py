@@ -387,12 +387,9 @@ class uavController:
                 rospy.sleep(0.1)
             else:
 
-                self.rhand = (0, 1); 
-                self.lhand = (1, 1)
+                rhand_ = self.mirrored_preds[10]
+                lhand_ = self.mirrored_preds[15]
 
-                # Reverse mirroring operation: 
-                lhand_ = (abs(self.lhand[0] - self.width), self.lhand[1])
-                rhand_ = (abs(self.rhand[0] - self.width), self.rhand[1])
                 
                 # Check start condition
                 if self.in_zone(lhand_, self.l_deadzone) and self.in_zone(rhand_, self.r_deadzone):
@@ -428,7 +425,8 @@ class uavController:
         # Plot stickman
         if self.prediction_started:
             points = self.hpe_preds
-            #points = mirror_points(points, self.width)
+
+            self.mirrored_preds = mirror_points(points, self.width)
             stickman_img = plot_stickman(img, points)
 
             # Convert to ROS msg
@@ -446,7 +444,7 @@ class uavController:
         header = preds.header
 
         # Extract x,y coordinate for each joint from human pose estimation
-        self.hpe_preds = map(extract_hpe_joint, preds.skeleton_2d) #self.hpe_preds = map(mirror_joints, self.hpe_preds)
+        self.hpe_preds = list(map(extract_hpe_joint, preds.skeleton_2d)) 
 
         self.prediction_started = True
 
@@ -517,9 +515,9 @@ def mirror_points(points, width):
     points_ = []
     for point in points:
         if point[1] > width/2: 
-            points_.append((point[0], point[1]-width/2))
+            points_.append((point[0]-width/2, point[1]))
         if point[1] < width/2:
-            points_.append((point[0], point[1]+width/2))
+            points_.append((point[0]+width/2, point[1]))
 
     return points_ 
 
