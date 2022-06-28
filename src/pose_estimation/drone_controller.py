@@ -13,6 +13,7 @@ import copy
 from geometry_msgs.msg import Pose, PoseStamped
 from std_msgs.msg import Float64MultiArray, Int32, Float32, Bool
 from sensor_msgs.msg import Image, CompressedImage, Joy, PointCloud2
+from aerial_core.common.visualanalysis_msgs.msg import BodyJoint2DArray
 import sensor_msgs.point_cloud2 as pc2
 
 from PIL import ImageDraw, ImageOps, ImageFont
@@ -48,12 +49,6 @@ class uavController:
         # Define zones / dependent on input video image (Can be extracted from camera_info) 
         self.height = 480; 
         self.width = 640; 
-
-        # Decoupled control  
-        if self.control_type == "euler": 
-            
-            # 1D control zones
-            self.height_rect, self.yaw_rect, self.pitch_rect, self.roll_rect = self.define_ctl_zones(self.width, self.height, 0.2, 0.05)
 
         # Coupled control --> Yaw/Height on same axis, Roll/Pitch on same axis
         if self.control_type == "euler2d": 
@@ -115,79 +110,17 @@ class uavController:
             self.joy_pub = rospy.Publisher("/joy", Joy, queue_size=1)
 
         self.stickman_area_pub = rospy.Publisher("/stickman_cont_area", Image, queue_size=1)
-        self.stickman_compressed_area_pub = rospy.Publisher("/stickman_compressed_ctl_area", CompressedImage, queue_size=1)
-
-        # Points
-        self.lhand_x_pub = rospy.Publisher("hpe/lhand_x", Int32, queue_size=1)
-        self.rhand_x_pub = rospy.Publisher("hpe/rhand_x", Int32, queue_size=1)
-        self.lhand_y_pub = rospy.Publisher("hpe/lhand_y", Int32, queue_size=1)
-        self.rhand_y_pub = rospy.Publisher("hpe/rhand_y", Int32, queue_size=1)
-        # Depths
-        self.d_wrist_pub = rospy.Publisher("hpe/d_wrist", Float32, queue_size=1)
-        self.d_shoulder_pub = rospy.Publisher("hpe/d_shoulder", Float32, queue_size=1)
-        self.d_relative_pub = rospy.Publisher("hpe/d_relative", Float32, queue_size=1)
 
     def _init_subscribers(self): 
 
-        self.preds_sub          = rospy.Subscriber("hpe_preds", Float64MultiArray, self.pred_cb, queue_size=1)
-        self.stickman_sub       = rospy.Subscriber("stickman", Image, self.draw_zones_cb, queue_size=1)
+        self.preds_sub          = rospy.Subscriber("/uav/visualanalysis/human_pose_2d", BodyJoint2DArray, self.pred_cb, queue_size=1)
+        #self.stickman_sub       = rospy.Subscriber("stickman", Image, self.draw_zones_cb, queue_size=1)
+        # It would be good to have method for itself here to be able to draw skeleton 
         self.current_pose_sub   = rospy.Subscriber("uav/pose", PoseStamped, self.curr_pose_cb, queue_size=1)
         self.start_calib_sub    = rospy.Subscriber("start_calibration", Bool, self.calib_cb, queue_size=1)
         self.depth_sub          = rospy.Subscriber("camera/depth/image", Image, self.depth_cb, queue_size=1)
         self.depth_pcl_sub      = rospy.Subscriber("camera/depth/points", PointCloud2, self.depth_pcl_cb, queue_size=1)
            
-    def publish_predicted_keypoints(self, rhand, lhand): 
-
-        rhand_x, rhand_y = rhand[0], rhand[1]; 
-        lhand_x, lhand_y = lhand[0], lhand[1]
-
-        rospy.logdebug("rhand: \t x: {}\t y: {}".format(rhand_x, rhand_y))
-        rospy.logdebug("lhand: \t x: {}\t y: {}".format(lhand_x, lhand_y))
-
-        self.lhand_x_pub.publish(int(lhand_x))
-        self.lhand_y_pub.publish(int(lhand_y))
-        self.rhand_x_pub.publish(int(rhand_x))
-        self.rhand_y_pub.publish(int(rhand_y))
-
-    def average_depth_cluster(self, px, py, k, config="WH"): 
-
-        indices = []
-        start_px = int(px - k); stop_px = int(px + k); 
-        start_py = int(py - k); stop_py = int(py + k); 
-
-        # Paired indices
-        for px in range(start_px, stop_px, 1): 
-                for py in range(start_py, stop_py, 1): 
-                    # Row major indexing
-                    if config == "WH": 
-                        indices.append((px, py))
-                    # Columnt major indexing
-                    if config == "HW":
-                        indices.append((py, px))
-            
-        # Fastest method for fetching specific indices!
-        depths = pc2.read_points(self.depth_pcl_msg, ['z'], False, uvs=indices)
-        
-        try:
-
-            depths = numpy.array(list(depths), dtype=numpy.float32)
-            depth_no_nans = list(depths[~numpy.isnan(depths)])
-
-            if len(depth_no_nans) > 0:                
-                
-                avg_depth = sum(depth_no_nans) / len(depth_no_nans)
-                rospy.logdebug("{} Average depth is: {}".format(config, avg_depth))
-                return avg_depth
-
-            else: 
-
-                return None
-        
-        except Exception as e:
-            rospy.logwarn("Exception occured: {}".format(str(e))) 
-            
-            return None
-
     def define_ctl_zones(self, img_width, img_height, edge_offset, rect_width):
         
         # img center
@@ -350,39 +283,6 @@ class uavController:
             rospy.logdebug("Left hand: {}".format(lhand))
             rospy.logdebug("Right hand: {}".format(rhand))
             
-    # TODO: Implement position change in same way it has been implemented for joy control     
-    def run_joy_ctl(self, lhand, rhand): 
-
-        joy_msg = Joy()
-
-        height_w, height_h = self.in_ctl_zone(lhand, self.height_rect, 20, orientation="vertical")
-        height_cmd = height_h 
-
-        yaw_w, yaw_h = self.in_ctl_zone(lhand, self.yaw_rect, 20, orientation="horizontal")
-        yaw_cmd = yaw_w
-
-        pitch_w, pitch_h = self.in_ctl_zone(rhand, self.pitch_rect, 20, orientation="vertical")
-        pitch_cmd = pitch_h
-
-        roll_w, roll_h = self.in_ctl_zone(rhand, self.roll_rect, 20, orientation="horizontal")
-        roll_cmd = roll_w 
-
-        reverse_dir = -1
-        # Added reverse because rc joystick implementation has reverse
-        reverse = True 
-        if reverse: 
-            roll_cmd  *= reverse_dir
-
-        rospy.logdebug("Height cmd: {}".format(height_cmd))
-        rospy.logdebug("Yaw cmd: {}".format(yaw_cmd))
-        rospy.logdebug("Pitch cmd: {}".format(pitch_cmd))
-        rospy.logdebug("Roll cmd: {}".format(roll_cmd))
-        
-        # Compose from commands joy msg
-        joy_msg = self.compose_joy_msg(pitch_cmd, roll_cmd, yaw_cmd, height_cmd)
-
-        # Publish composed joy msg
-        self.joy_pub.publish(joy_msg)
     
     # 2D control 
     def define_ctl_zone(self, w, h, cx, cy):
@@ -484,36 +384,6 @@ class uavController:
         # Publish composed joy msg
         self.joy_pub.publish(joy_msg)
 
-    def run_joy2d_dpth_ctl(self, lhand, rhand, d): 
-
-        yaw_cmd, height_cmd = self.in_ctl2d_zone(lhand, self.l_zone, 25)
-        pitch_cmd, roll_cmd = self.in_ctl2d_zone(rhand, self.r_zone, 25)
-
-        # Depth cmd
-        # pitch_cmd = curr_depth - avg_depth 
-        # Use relative depth as pitch command
-        pitch_cmd = d
-
-        reverse_dir = -1
-        # Added reverse because rc joystick implementation has reverse
-        reverse = True 
-        if reverse: 
-            roll_cmd  *= reverse_dir
-
-        # Test!
-        debug_joy = True
-        if debug_joy:
-            rospy.logdebug("Height cmd: {}".format(height_cmd))
-            rospy.logdebug("Yaw cmd: {}".format(yaw_cmd))
-            rospy.logdebug("Pitch cmd: {}".format(pitch_cmd))
-            rospy.logdebug("Roll cmd: {}".format(roll_cmd))
-
-        # Compose from commands joy msg
-        joy_msg = self.compose_joy_msg(pitch_cmd, roll_cmd, yaw_cmd, height_cmd)
-
-        # Publish composed joy msg
-        self.joy_pub.publish(joy_msg)
-
     def zones_calibration(self, right, left, done):
         
         if not done: 
@@ -545,43 +415,6 @@ class uavController:
 
         return ((avg_rshoulder_px, avg_rshoulder_py), (avg_lshoulder_px, avg_lshoulder_py))
 
-    def depth_minmax_calib(self, collected_data): 
-         
-        min_data = min(collected_data)
-        max_data = max(collected_data)
-        data_range = max_data - min_data
-
-        return min_data, max_data, data_range
-
-    def depth_avg_calib(self, collected_data): 
-                     
-        avg = sum(collected_data)/len(collected_data)
-
-        return avg
-
-    def depth_data_collection(self, px, py, done=False):
-
-        if not done:
-            depth = self.average_depth_cluster(px, py, 2, "WH")
-            if depth: 
-                self.calib_depth.append(depth)
-        else: 
-
-            #avg_depth  = sum(self.calib_depth) / len(self.calib_depth)
-            
-            # Return collected data
-            return self.calib_depth
-
-    def create_float32_msg(self, value):
-
-        msg = Float32()
-
-        if value:  
-            msg.data = value
-        else:
-            msg.data = -1.0 
-
-        return msg
 
     def run(self): 
 
@@ -617,75 +450,16 @@ class uavController:
                         self.control_type = self.init_control_type 
                         self.start_calib = False
 
-                # Move zones based on current shoulder
-                dynamic = False
-                if dynamic:                         
-                    calib_points = self.average_zone_points(rshoulder_, lshoulder_, 10)
-                    self.r_zone = self.define_ctl_zone(self.ctl_width, self.ctl_height, calib_points[0][0], calib_points[0][1])
-                    self.l_zone = self.define_ctl_zone(self.ctl_width, self.ctl_height, calib_points[1][0], calib_points[1][1])
-                    self.height_rect, self.yaw_rect, self.pitch_rect, self.roll_rect =  self.define_calibrated_ctl_zones(calib_points, self.width, self.height)
-                    self.l_deadzone = self.define_deadzones(self.height_rect, self.yaw_rect)
-                    self.r_deadzone = self.define_deadzones(self.pitch_rect, self.roll_rect)                    
-                    rospy.logdebug("l_deadzone: {}".format(self.l_deadzone))
-                    rospy.logdebug("r_deadzone: {}".format(self.r_deadzone))
-
-                # ====================== Execution ========================
-                if self.control_type == "position": 
-
-                    self.run_position_ctl(lhand_, rhand_)
-
-                if self.control_type == "euler":                
-
-                    if self.in_zone(lhand_, self.l_deadzone) and self.in_zone(rhand_, self.r_deadzone):
-                        self.start_joy_ctl = True 
-                    else:
-                        rospy.loginfo("Not in deadzones!")           
-                    
-                    if self.start_joy_ctl:
-                        self.run_joy_ctl(lhand_, rhand_)
 
                 if self.control_type == "euler2d":                    
-                    
-                    # Use depth information (decouple it!)
-                    if self.depth_recv:
-                        # Using self.rhand and rhand_[1] because self.rhand is not mirrored (which makes it okay for depth!)
-                        current_wrist_depth = self.average_depth_cluster(self.rhand[0], rhand_[1], 2, "WH")
-                        current_r_shoulder_depth = self.average_depth_cluster(self.rshoulder[0], self.rshoulder[1], 2, "WH")
-                        ros_wrist_depth = self.create_float32_msg(current_wrist_depth)
-                        ros_shoulder_depth = self.create_float32_msg(current_r_shoulder_depth)
-                        # Publish wrist and shoulder depth
-                        self.d_wrist_pub.publish(ros_wrist_depth)
-                        self.d_shoulder_pub.publish(ros_shoulder_depth)
 
-                        try: 
-                            dist = current_r_shoulder_depth - current_wrist_depth
-                            self.relative_dist = dist
-                            ros_relative_depth = self.create_float32_msg(dist)
-                            # Publish relative wrist and shoulder depth
-                            self.d_relative_pub.publish(ros_relative_depth)
-
-                            rospy.logdebug("Current relative distance is: {}".format(dist))
-                        except Exception as e:
-                            rospy.logwarn("Exception is: {}".format(str(e)))                     
-                        
+                    # Weird logic
                     if self.in_zone(lhand_, self.l_deadzone) and self.in_zone(rhand_, self.r_deadzone):
                         self.start_joy2d_ctl = True 
                     else:
                         rospy.loginfo("Not in deadzones!")        
                     
                     if self.start_joy2d_ctl: 
-                        # Normal joy2d
-                        # self.run_joy2d_ctl(lhand_, rhand_)
-                        # Depth joy2d
-                        #rospy.loginfo("Current depth is: {}".format(dist))
-                        n_depth = 4
-                        # =============== Calibration ===============
-                        # Depth averaging --> move to another method
-                        #if dist:
-                        #    self.calib_depth.append(current_depth)
-                        #    current_depth = sum(self.calib_depth[-n_depth:])/len(self.calib_depth[-n_depth:])                            
-                        #else: 
-                        #    current_depth = sum(self.calib_depth[-n_depth:])/len(self.calib_depth[-n_depth:])
 
                         self.run_joy2d_ctl(lhand_, rhand_)
 
