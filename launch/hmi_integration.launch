@@ -8,26 +8,16 @@
     <arg name="depth_cam"       default="false"/>
 
     <!-- Launch usb_cam and HPE -->
-    <include file="$(find hpe_ros_package)/launch/webcam_inference.launch"/>
+    <!-- Has topic republish from image_raw to topic_name_for_gesture-->
+    <include file="$(find usb_cam)/launch/usb_cam-test.launch"/>
+
+    <!-- Launch human pose estimation by auth-->
+    <include file="$(find visualanalysis_acw)/launch/gesture_2d_pose.launch"/>
 
     <!-- send position commands using HPE -->
     <node name="controller_node" pkg="hpe_ros_package" type="drone_controller.py" args="$(arg ctl_freq) $(arg control_type)" output="screen"/>
 
-    <!-- add image transport for compression --> 
-    <!-- Only republishes! -->
-    <!-- node name="image_compression_node" pkg="image_transport" type="republish" output="screen" 
-     args="raw in:=stickman_cont_area compressed out:=stickman_compressed"/--> 
 
-    <!-- add fkie multimaster --> 
-    <!-- add discovery --> 
-    <!-- add master_sync -->   
-
-    <!-- play sound command for UAV operator -->
-    <!-- Requires pulseaudio client configuration which is used in docker -->
-    <!-- node name="sound_play" pkg="sound_play" type="soundplay_node.py"/ -->
-
-    <!-- generate sound comparing current and wanted UAV pose -->
-    <!-- node name="generate_ref_sound" pkg="simulation_sound_play" type="generate_ref_sound.py" / -->
 
 
 </launch>

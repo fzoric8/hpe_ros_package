@@ -1,5 +1,0 @@
-<launch>
-	
-	<node  pkg="hpe_ros_package" type="camera_hpe.py" args="--cfg /home/developer/catkin_ws/src/hpe_ros_package/src/experiments/mpii/resnet50/384x384_d256x3_adam_lr1e-3.yaml --flip-test --model-file /home/developer/catkin_ws/src/hpe_ros_package/src/models/pose_resnet_50_384x384.pth.tar" name="hpe"/>
-	<node name="usb_camera" pkg="usb_cam" type="usb_cam_node"/><!-- launch-prefix="bash -c 'sleep 5; $0 $@'"/!-->
-</launch>
