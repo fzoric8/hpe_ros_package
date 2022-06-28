@@ -1,8 +1,4 @@
 #!/opt/conda/bin/python3
-from audioop import avg
-from multiprocessing import reduction
-import queue
-from turtle import width
 import rospy
 import rospkg
 import sys
@@ -39,13 +35,13 @@ class uavController:
         self._init_subscribers(); 
 
         # Define zones / dependent on input video image (Can be extracted from camera_info) 
-        self.height = 480; 
-        self.width = 640; 
+        self.height     = 480; 
+        self.width      = 640; 
 
         # 2D control zones
-        self.ctl_width = self.width/3.5; self.ctl_height = self.height/2
-        self.r_zone = self.define_ctl_zone( self.ctl_width, self.ctl_height, 3 * self.width/4, self.height/2)
-        self.l_zone = self.define_ctl_zone( self.ctl_width, self.ctl_height, self.width/4, self.height/2)
+        self.ctl_width  = self.width/3.5; self.ctl_height = self.height/2
+        self.r_zone     = self.define_ctl_zone( self.ctl_width, self.ctl_height, 3 * self.width/4, self.height/2)
+        self.l_zone     = self.define_ctl_zone( self.ctl_width, self.ctl_height, self.width/4, self.height/2)
 
         rospy.logdebug("Right zone: {}".format(self.r_zone))
         rospy.logdebug("Left zone: {}".format(self.l_zone))
@@ -56,40 +52,39 @@ class uavController:
         self.l_deadzone = self.define_deadzones(self.height_rect, self.yaw_rect)
         self.r_deadzone = self.define_deadzones(self.pitch_rect, self.roll_rect)
 
-        self.start_position_ctl = False
-        self.start_joy_ctl = False
-        self.start_joy2d_ctl = False
-        
-        self.rate = rospy.Rate(int(frequency))     
+        self.start_position_ctl     = False
+        self.start_joy_ctl          = False
+        self.start_joy2d_ctl        = False
 
         # Debugging arguments
-        self.inspect_keypoints = False
-        self.recv_pose_meas = False        
+        self.inspect_keypoints  = False
+        self.recv_pose_meas     = False        
 
         # Image compression for human-machine interface
-        self.hmi_compression = False
+        self.hmi_compression    = False
 
         # Flags for run method
-        self.initialized = True
+        self.initialized        = True
         self.prediction_started = False
+        self.stickman_published = True
 
+        self.rate = rospy.Rate(int(frequency))     
         rospy.loginfo("Initialized!")   
 
     def _init_publishers(self): 
         
-        self.joy_pub = rospy.Publisher("/joy", Joy, queue_size=1)
-
-        self.stickman_area_pub = rospy.Publisher("/stickman_cont_area", Image, queue_size=1)
+        self.joy_pub            = rospy.Publisher("/joy", Joy, queue_size=1)
+        self.stickman_area_pub  = rospy.Publisher("/stickman_cont_area", Image, queue_size=1)
+        self.stickman_pub       = rospy.Publisher("/stickman", Image, queue_size=1)
 
     def _init_subscribers(self): 
         
         # Get human skeleton points
         self.preds_sub          = rospy.Subscriber("/uav/visualanalysis/human_pose_2d", BodyJoint2DArray, self.pred_cb, queue_size=1)
-        #self.stickman_sub       = rospy.Subscriber("stickman", Image, self.draw_zones_cb, queue_size=1)
+        self.cam_sub            = rospy.Subscriber("/uav/visualanalysis/rgb_camera", Image, self.img_cb, queue_size=1)
+        self.stickman_sub       = rospy.Subscriber("stickman", Image, self.draw_zones_cb, queue_size=1)
         # It would be good to have method for itself here to be able to draw skeleton 
         self.current_pose_sub   = rospy.Subscriber("uav/pose", PoseStamped, self.curr_pose_cb, queue_size=1)
-        self.start_calib_sub    = rospy.Subscriber("start_calibration", Bool, self.calib_cb, queue_size=1)
-
            
     def define_ctl_zones(self, img_width, img_height, edge_offset, rect_width):
         
@@ -112,11 +107,11 @@ class uavController:
         # Define rectangle for height control
         height_rect = ((cx1 - r_width, height_edge), (cx1 + r_width, img_height - height_edge))
         # Define rectangle for yaw control
-        yaw_rect = ((width_edge, cy - r_width), (cx - width_edge, cy + r_width))
+        yaw_rect    = ((width_edge, cy - r_width), (cx - width_edge, cy + r_width))
         # Define rectangle for pitch control
-        pitch_rect = ((cx2 - r_width, height_edge), (cx2 + r_width, img_height - height_edge))
+        pitch_rect  = ((cx2 - r_width, height_edge), (cx2 + r_width, img_height - height_edge))
         # Define rectangle for roll control 
-        roll_rect = ((cx + width_edge, cy-r_width), (img_width - width_edge, cy + r_width))
+        roll_rect   = ((cx + width_edge, cy-r_width), (img_width - width_edge, cy + r_width))
         
         return height_rect, yaw_rect, pitch_rect, roll_rect
 
@@ -193,7 +188,7 @@ class uavController:
         x, y = point[0], point[1]
         x0, y0  = rect[0][0], rect[0][1]
         x1, y1  = rect[1][0], rect[1][1]
-        cx, cy = self.determine_center(rect)
+        cx, cy  = self.determine_center(rect)
 
         if orientation == "vertical":
             rect1 = ((x0, y0), (cx + deadzone, cy - deadzone) )
@@ -384,20 +379,21 @@ class uavController:
 
         return ((avg_rshoulder_px, avg_rshoulder_py), (avg_lshoulder_px, avg_lshoulder_py))
 
-
     def run(self): 
 
         while not rospy.is_shutdown():
-            if not self.initialized or not self.prediction_started: 
+            if not self.initialized or not (self.prediction_started and self.stickman_published): 
                 rospy.logdebug("Waiting prediction")
                 rospy.sleep(0.1)
             else:
+
+                self.rhand = (0, 1); 
+                self.lhand = (1, 1)
 
                 # Reverse mirroring operation: 
                 lhand_ = (abs(self.lhand[0] - self.width), self.lhand[1])
                 rhand_ = (abs(self.rhand[0] - self.width), self.rhand[1])
                 
-
                 # Check start condition
                 if self.in_zone(lhand_, self.l_deadzone) and self.in_zone(rhand_, self.r_deadzone):
                     self.start_joy2d_ctl = True 
@@ -410,7 +406,6 @@ class uavController:
 
                 self.rate.sleep()
 
-
     def curr_pose_cb(self, msg):
         
         self.recv_pose_meas = True; 
@@ -419,23 +414,42 @@ class uavController:
         self.current_pose.pose.position = msg.pose.position
         self.current_pose.pose.orientation = msg.pose.orientation
 
+    def img_cb(self, msg): 
+
+        rospy.loginfo("Recieved raw camera img.")
+
+        # Convert ROS Image to PIL
+        img = numpy.frombuffer(msg.data, dtype=numpy.uint8).reshape(msg.height, msg.width, -1)
+        img = PILImage.fromarray(img.astype('uint8'), 'RGB')
+
+        # Mirror image here 
+        img = ImageOps.mirror(img) 
+
+        # Plot stickman
+        if self.prediction_started:
+            points = self.hpe_preds
+            #points = mirror_points(points, self.width)
+            stickman_img = plot_stickman(img, points)
+
+            # Convert to ROS msg
+            stickman_msg = convert_pil_to_ros_img(stickman_img)
+
+            # Publish stickman
+            self.stickman_pub.publish(stickman_msg)
+
+            self.stickman_published = True
+
+
     def pred_cb(self, preds):
 
-        print(preds)
+        # Timestamp
+        header = preds.header
 
-        
+        # Extract x,y coordinate for each joint from human pose estimation
+        self.hpe_preds = map(extract_hpe_joint, preds.skeleton_2d) #self.hpe_preds = map(mirror_joints, self.hpe_preds)
 
-        #self.prediction_started = True
+        self.prediction_started = True
 
-        #self.rhand = preds[10]
-        #self.lhand = preds[15]
-
-
-    def calib_cb(self, msg): 
-        
-        self.start_calib = msg.data
-
-        self.start_calib_time = rospy.Time.now().to_sec()
 
     def draw_zones_cb(self, stickman_img):
         
@@ -444,16 +458,16 @@ class uavController:
         img = numpy.frombuffer(stickman_img.data, dtype=numpy.uint8).reshape(stickman_img.height, stickman_img.width, -1)
         img = PILImage.fromarray(img.astype('uint8'), 'RGB')
 
+        # It seems like there's already mirroring
         # Mirror image here 
-        img = ImageOps.mirror(img) 
+        # img = ImageOps.mirror(img) 
         
         # Draw rectangles which represent areas for control
         draw = ImageDraw.Draw(img, "RGBA")
 
-        if self.control_type == "euler2d": 
-
-            draw.rectangle(self.l_zone, width = 3)
-            draw.rectangle(self.r_zone, width = 3)
+        # Control zones
+        draw.rectangle(self.l_zone, width = 3)
+        draw.rectangle(self.r_zone, width = 3)
         
         # Rect for yaw
         draw.rectangle(self.yaw_rect, fill=(178,34,34, 100), width=2)       
@@ -492,7 +506,24 @@ class uavController:
 
    
 def str2bool(v):
-  return v.lower() in ("yes", "true", "t", "1")
+    return v.lower() in ("yes", "true", "t", "1")
+
+def extract_hpe_joint(joint):
+
+    return (joint.x, joint.y)
+
+def mirror_points(points, width): 
+
+    points_ = []
+    for point in points:
+        if point[1] > width/2: 
+            points_.append((point[0], point[1]-width/2))
+        if point[1] < width/2:
+            points_.append((point[0], point[1]+width/2))
+
+    return points_ 
+
+    
         
 if __name__ == '__main__':
 

@@ -43,6 +43,23 @@ def get_text_dimensions(text_string, font):
     text_height = font.getmask(text_string).getbbox()[3] + descent
 
     return (text_width, text_height)
+
+def plot_stickman(img, points, point_width=4): 
+
+    draw = ImageDraw.Draw(img); 
+
+    # get a font
+    fnt = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 25)
+
+    for i, joint in enumerate(points): 
+        #draw.point((joint[0], joint[1]), width=2)
+        r=5
+        draw.ellipse((joint[0]-r, joint[1]-r, joint[0]+r, joint[1]+r), fill=(255, 0, 0))
+        draw.text((joint[0], joint[1]), "{}".format(i),  fill=(150, 0, 0, 255), font=fnt)
+
+    return img
+
+
     
 def bgr2rgb(img):
         
