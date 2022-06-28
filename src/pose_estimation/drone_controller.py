@@ -66,7 +66,7 @@ class uavController:
         # Flags for run method
         self.initialized        = True
         self.prediction_started = False
-        self.stickman_published = True
+        self.stickman_published = False
 
         self.rate = rospy.Rate(int(frequency))     
         rospy.loginfo("Initialized!")   
@@ -386,7 +386,8 @@ class uavController:
                 rospy.logdebug("Waiting prediction")
                 rospy.sleep(0.1)
             else:
-
+                
+                # 9 and 10
                 rhand_ = self.mirrored_preds[10]
                 lhand_ = self.mirrored_preds[15]
 
@@ -426,7 +427,7 @@ class uavController:
         if self.prediction_started:
             points = self.hpe_preds
 
-            self.mirrored_preds = mirror_points(points, self.width)
+            self.mirrored_preds = points
             stickman_img = plot_stickman(img, points)
 
             # Convert to ROS msg

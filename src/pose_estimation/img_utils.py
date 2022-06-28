@@ -55,7 +55,7 @@ def plot_stickman(img, points, point_width=4):
         #draw.point((joint[0], joint[1]), width=2)
         r=5
         draw.ellipse((joint[0]-r, joint[1]-r, joint[0]+r, joint[1]+r), fill=(255, 0, 0))
-        draw.text((joint[0], joint[1]), "{}".format(i),  fill=(150, 0, 0, 255), font=fnt)
+        draw.text((joint[0], joint[1]), "{}".format(i),  fill=(0, 155, 0, 255), font=fnt)
 
     return img
 
