@@ -46,6 +46,10 @@ def get_text_dimensions(text_string, font):
 
 def plot_stickman(img, points, point_width=4): 
 
+    plot_joint_dot = True; 
+    plot_joint_num = True; 
+    plot_stickman_ = True; 
+
     draw = ImageDraw.Draw(img); 
 
     # get a font
@@ -54,11 +58,55 @@ def plot_stickman(img, points, point_width=4):
     for i, joint in enumerate(points): 
         #draw.point((joint[0], joint[1]), width=2)
         r=5
-        draw.ellipse((joint[0]-r, joint[1]-r, joint[0]+r, joint[1]+r), fill=(255, 0, 0))
-        draw.text((joint[0], joint[1]), "{}".format(i),  fill=(0, 155, 0, 255), font=fnt)
+        if plot_joint_dot: 
+            draw.ellipse((joint[0]-r, joint[1]-r, joint[0]+r, joint[1]+r), fill=(255, 0, 0))
+        if plot_joint_num:
+            draw.text((joint[0], joint[1]), "{}".format(i),  fill=(0, 155, 0, 255), font=fnt)
+
+    if plot_stickman_: 
+        check_conditions_and_draw_lines(draw, points)
 
     return img
 
+def check_conditions_and_draw_lines(draw, points): 
+
+    if numpy.all(points[16] != [-1, -1]) and numpy.all(points[14] != [-1, -1]):
+        plot_line(draw, points, 16, 14, color=(128, 0, 0))
+    if numpy.all(points[12] != [-1, -1]) and numpy.all(points[12] != [-1, -1]): 
+        plot_line(draw, points, 14, 12, color=(128, 0, 0))
+    if numpy.all(points[12] != [-1, -1]) and numpy.all(points[6] != [-1, -1]):
+        plot_line(draw, points, 12, 6)
+    if numpy.all(points[6] != [-1, -1]) and numpy.all(points[8] != [-1, -1]):
+        plot_line(draw, points, 6, 8)
+    if numpy.all(points[8] != [-1, -1]) and numpy.all(points[10] != [-1, -1]):
+        plot_line(draw, points, 8, 10)
+    if numpy.all(points[6] != [-1, -1]) and numpy.all(points[5] != [-1, -1]):
+        plot_line(draw, points, 6, 5)
+    if numpy.all(points[11] != [-1, -1]) and numpy.all(points[13] != [-1, -1]):
+        plot_line(draw, points, 11, 13)
+    if numpy.all(points[13] != [-1, -1]) and numpy.all(points[15] != [-1, -1]):
+        plot_line(draw, points, 13, 15)
+    if numpy.all(points[0] != [-1, -1]) and numpy.all(points[2] != [-1, -1]):
+        plot_line(draw, points, 0, 2)
+    if numpy.all(points[11] != [-1, -1]) and numpy.all(points[5] != [-1, -1]):
+        plot_line(draw, points, 11, 5)
+    if numpy.all(points[5] != [-1, -1]) and numpy.all(points[7] != [-1, -1]):
+        plot_line(draw, points, 5, 7)
+    if numpy.all(points[7] != [-1, -1]) and numpy.all(points[9] != [-1, -1]):
+        plot_line(draw, points, 7, 9)
+    if numpy.all(points[1] != [-1, -1]) and numpy.all(points[0] != [-1, -1]):
+        plot_line(draw, points, 1, 0)
+    if numpy.all(points[1] != [-1, -1]) and numpy.all(points[3] != [-1, -1]):
+        plot_line(draw, points, 1, 3)
+    if numpy.all(points[2] != [-1, -1]) and numpy.all(points[4] != [-1, -1]):
+        plot_line(draw, points, 2, 4)
+
+    
+
+
+def plot_line(draw, points, idx, idy, color=128): 
+
+    draw.line((points[idx][0], points[idx][1] , points[idy][0], points[idy][1]), fill=color, width=3)
 
     
 def bgr2rgb(img):

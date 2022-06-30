@@ -427,8 +427,8 @@ class uavController:
         if self.prediction_started:
             points = self.hpe_preds
 
-            self.mirrored_preds = points
-            stickman_img = plot_stickman(img, points)
+            self.mirrored_preds = mirror_points(points, 640)
+            stickman_img = plot_stickman(img, self.mirrored_preds)
 
             # Convert to ROS msg
             stickman_msg = convert_pil_to_ros_img(stickman_img)
@@ -515,10 +515,7 @@ def mirror_points(points, width):
 
     points_ = []
     for point in points:
-        if point[1] > width/2: 
-            points_.append((point[0]-width/2, point[1]))
-        if point[1] < width/2:
-            points_.append((point[0]+width/2, point[1]))
+        points_.append((abs(point[0] - width), point[1]))
 
     return points_ 
 
