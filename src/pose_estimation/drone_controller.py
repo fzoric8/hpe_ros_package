@@ -73,7 +73,7 @@ class uavController:
 
     def _init_publishers(self): 
         
-        self.joy_pub            = rospy.Publisher("/joy", Joy, queue_size=1)
+        self.joy_pub            = rospy.Publisher("/hpe_joy", Joy, queue_size=1)
         self.stickman_area_pub  = rospy.Publisher("/stickman_cont_area", Image, queue_size=1)
         self.stickman_pub       = rospy.Publisher("/stickman", Image, queue_size=1)
 
@@ -297,11 +297,13 @@ class uavController:
         x1, y1 = rect[1][0], rect[1][1]
         cx, cy = (x1 + x0) / 2, (y1 + y0) / 2
 
-        rospy.logdebug("x0: {}\t x1: {}".format(x0, x1))
-        rospy.logdebug("y0: {}\t y1: {}".format(y0, y1))
-        rospy.logdebug("cx: {}".format(cx))
-        rospy.logdebug("cy: {}".format(cy))
-        
+        debug_coords = False
+        if debug_coords:
+            rospy.logdebug("x0: {}\t x1: {}".format(x0, x1))
+            rospy.logdebug("y0: {}\t y1: {}".format(y0, y1))
+            rospy.logdebug("cx: {}".format(cx))
+            rospy.logdebug("cy: {}".format(cy))
+            
         if self.in_zone(point, rect): 
             
             rospy.logdebug("x: {}".format(x))
@@ -389,8 +391,7 @@ class uavController:
                 
                 # 9 and 10
                 rhand_ = self.mirrored_preds[10]
-                lhand_ = self.mirrored_preds[15]
-
+                lhand_ = self.mirrored_preds[9]
                 
                 # Check start condition
                 if self.in_zone(lhand_, self.l_deadzone) and self.in_zone(rhand_, self.r_deadzone):
@@ -414,7 +415,7 @@ class uavController:
 
     def img_cb(self, msg): 
 
-        rospy.loginfo("Recieved raw camera img.")
+        #rospy.logdebug("Recieved raw camera img.")
 
         # Convert ROS Image to PIL
         img = numpy.frombuffer(msg.data, dtype=numpy.uint8).reshape(msg.height, msg.width, -1)

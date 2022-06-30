@@ -2,7 +2,7 @@
 <launch>
     
     <!-- Determine HPE + UAV ctl responsivness min(1)/max(209)-->
-    <arg name="ctl_freq" value="10"/>
+    <arg name="ctl_freq" value="1"/>
     <arg name="use_calibration" default="false"/>
     <arg name="control_type"    default="euler2d"/>
     <arg name="depth_cam"       default="false"/>
