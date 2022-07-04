@@ -109,6 +109,25 @@ which has 1.224 GFLOPS by specification.
 
 On my PC with NVIDIA GeForce MX330, achieved inference time with LPN network is around 5Hz. 
 
+### AUTH-integration 
+
+There are two parallel same/different things. 
+
+One is based on auth human pose estimation and uses following launch file: 
+```
+roslaunch uav_control.launch
+```
+
+Which basically subscribes to existing topic with `skeleton2d` pose and runs human pose control. 
+
+Another one is based on `simplebaselines` human pose estimation and `uav_sb_controller.py` 
+which is a backup option that prevents unwanted reference jumps caused by wrong hand position estimates 
+from auth package. 
+
+Both of them can be used and run through tmuxinator and final result is published on topics: 
+ * `stickman_cont_area` --> stickman with zones used for `gui` and `reference` generation 
+ * `hpe_joy` --> publish hpe references in format of joystick msg 
+
 ### TODO High priority: 
 
  - [ ] Check launch files / Add depth and control types arguments 

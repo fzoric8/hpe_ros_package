@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<launch>
+    
+    <arg name="control_type"    default="euler2d"/>
+    <arg name="ctl_freq" value="10"/>
+
+    <!-- send position commands using HPE -->
+    <node name="controller_node" pkg="hpe_ros_package" type="uav_sb_controller.py" args="$(arg ctl_freq)" output="screen"/>
+
+</launch>
