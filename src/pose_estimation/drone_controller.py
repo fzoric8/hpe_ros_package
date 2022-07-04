@@ -81,7 +81,8 @@ class uavController:
         
         # Get human skeleton points
         self.preds_sub          = rospy.Subscriber("/uav/visualanalysis/human_pose_2d", BodyJoint2DArray, self.pred_cb, queue_size=1)
-        self.cam_sub            = rospy.Subscriber("/uav/visualanalysis/rgb_camera", Image, self.img_cb, queue_size=1)
+        #self.cam_sub            = rospy.Subscriber("/uav/visualanalysis/rgb_camera", Image, self.img_cb, queue_size=1)
+        self.cam_sub            = rospy.Subscriber("/camera/image_raw", Image, self.img_cb, queue_size=1)
         self.stickman_sub       = rospy.Subscriber("stickman", Image, self.draw_zones_cb, queue_size=1)
         # It would be good to have method for itself here to be able to draw skeleton 
         self.current_pose_sub   = rospy.Subscriber("uav/pose", PoseStamped, self.curr_pose_cb, queue_size=1)
@@ -415,7 +416,7 @@ class uavController:
 
     def img_cb(self, msg): 
 
-        #rospy.logdebug("Recieved raw camera img.")
+        rospy.logdebug("Recieved raw camera img.")
 
         # Convert ROS Image to PIL
         img = numpy.frombuffer(msg.data, dtype=numpy.uint8).reshape(msg.height, msg.width, -1)
@@ -442,6 +443,8 @@ class uavController:
 
     def pred_cb(self, preds):
 
+        rospy.logdebug("Recieved predictions!")
+
         # Timestamp
         header = preds.header
 
@@ -456,6 +459,7 @@ class uavController:
         start_time = rospy.Time().now().to_sec()
         # Convert ROS Image to PIL
         img = numpy.frombuffer(stickman_img.data, dtype=numpy.uint8).reshape(stickman_img.height, stickman_img.width, -1)
+        img = bgr2rgb(img)
         img = PILImage.fromarray(img.astype('uint8'), 'RGB')
 
         # It seems like there's already mirroring
