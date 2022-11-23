@@ -113,7 +113,9 @@ On my PC with NVIDIA GeForce MX330, achieved inference time with LPN network is 
 
 * epfl --> branch used at EPFL for controlling their drone, contains parts of their `drone.py` class and position control from optitrack 
 * hpe/experiment_setup --> contains code which was used for running experiments for paper `Towards intuitive HMI control` 
-* auth/integration -> contains code that enables auth integration as well as simplebaselines human pose estimation for integration with `med_uav_control` and real bebop 
+* auth/integration -> contains code that enables auth integration as well as simplebaselines human pose estimation for integration with `med_uav_control`
+and real bebop 
+* hpe_3d -> branch that contains code for 3D arm pose estimation for imitation learning system
 
 ### TODO High priority: 
 
