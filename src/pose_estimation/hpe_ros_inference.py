@@ -14,10 +14,18 @@ from data_to_images import draw_stickman
 import cv2
 
 import argparse
-import os
 import sys
 import pprint
 import statistics
+
+# Explicitly set number of threads used by this script
+import os
+os.environ["OMP_NUM_THREADS"] = "2"
+os.environ["OMP_NUM_THREADS"] = "2" # export OMP_NUM_THREADS=1
+os.environ["OPENBLAS_NUM_THREADS"] = "2" # export OPENBLAS_NUM_THREADS=1
+os.environ["MKL_NUM_THREADS"] = "2" # export MKL_NUM_THREADS=1
+os.environ["VECLIB_MAXIMUM_THREADS"] = "2" # export VECLIB_MAXIMUM_THREADS=1
+os.environ["NUMEXPR_NUM_THREADS"] = "2" # export NUMEXPR_NUM_THREADS=1
 
 import torch
 import torch.nn.parallel
@@ -103,9 +111,11 @@ class HumanPoseEstimationROS():
     def _init_subscribers(self):
 
         if self.use_compressed_img:
-            self.camera_sub = rospy.Subscriber("usb_camera/image_raw/compressed", Image, self.compressed_img_cb, queue_size=1)
+            rospy.loginfo("Subscribing to compressed image!")
+            self.camera_sub = rospy.Subscriber("usb_camera/image_raw/compressed", CompressedImage, self.compressed_img_cb, queue_size=1)
         
         if self.use_normal_img:
+            rospy.loginfo("Subscribing to normal image!")
             self.camera_sub = rospy.Subscriber("usb_camera/image_raw", Image, self.image_cb, queue_size=1)
         #self.darknet_sub = rospy.Subscriber("/darknet_ros/bounding_boxes", BoundingBoxes, self.darknet_cb, queue_size=1)
 
@@ -114,6 +124,7 @@ class HumanPoseEstimationROS():
         self.image_pub = rospy.Publisher("/stickman", Image, queue_size=1)
         self.image_compressed_pub = rospy.Publisher("/stickman_compressed", CompressedImage, queue_size=1)
         self.pred_pub = rospy.Publisher("/hpe_preds", Float64MultiArray, queue_size=1)
+        self.img_capt_pub = rospy.Publisher("/test_pub", Image, queue_size=1)
 
     def _load_model(self, config):
         
@@ -140,8 +151,11 @@ class HumanPoseEstimationROS():
 
     def image_cb(self, msg):
 
+        #rospy.sleep(0.1)
+
         # Get travel time (time in which image has been captured to recieving in callback)
         rospy.loginfo("Travel time is: {}".format(self.get_travel_time(msg.header)))
+        self.img_capt_pub.publish(msg)
 
         start_time = rospy.Time.now().to_sec()
 
@@ -193,12 +207,14 @@ class HumanPoseEstimationROS():
 
     def compressed_img_cb(self, msg): 
 
+        rospy.sleep(0.1)
+
         rospy.loginfo("Compressed image travel time is: {}".format(self.get_travel_time(msg.header)))
 
         start_time = rospy.Time.now().to_sec()
 
 
-        self.org_img = numpy.array(io.BytesIO(bytearray(msg.data)), dtype=numpy.uint8)
+        self.org_img = numpy.array(PILImage.open(io.BytesIO(bytearray(msg.data))), dtype=numpy.uint8)
 
         # Normalize
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -232,8 +248,7 @@ class HumanPoseEstimationROS():
 
         duration = rospy.Time.now().to_sec() - start_time 
 
-        rospy.loginfo("Duration of image_cb is: {}".format(duration)) # max --> 0.01s
-
+        rospy.loginfo("Duration of compressed image_cb is: {}".format(duration)) # max --> 0.01s
                          
     def darknet_cb(self, darknet_boxes):
         

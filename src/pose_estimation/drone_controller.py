@@ -37,7 +37,7 @@ class uavController:
         # Define zones / dependent on input video image 
         self.height = 480; self.width = 640; 
 
-        self.height_rect, self.yaw_rect, self.pitch_rect, self.roll_rect = self.define_ctl_zones(self.width, self.height, 0.2, 0.03)
+        self.height_rect, self.yaw_rect, self.pitch_rect, self.roll_rect = self.define_ctl_zones(self.width, self.height, 0.2, 0.05)
 
         self.l_deadzone = self.define_deadzones(self.height_rect, self.yaw_rect)
         self.r_deadzone = self.define_deadzones(self.pitch_rect, self.roll_rect)
@@ -219,7 +219,7 @@ class uavController:
         # Define offsets from edge
         if edge_offset < 1: 
             height_edge = edge_offset * img_height
-            width_edge = edge_offset/2 * img_width
+            width_edge = edge_offset/4 * img_width
 
         # Zone definition 
         if rect_width < 1: 
@@ -460,7 +460,6 @@ class uavController:
                         self.run_joy_ctl(lhand_, rhand_)
 
                 self.rate.sleep()
-
 
     @staticmethod
     def convert_pil_to_ros_img(img):

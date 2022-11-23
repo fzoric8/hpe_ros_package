@@ -1,12 +1,12 @@
 <launch>
 
-    <arg name="frequency" value="5"/>
+    <arg name="frequency" value="20"/>
     <arg name="video_dev" value="/dev/video0"/>
-    <arg name="model_path" value="/home/developer/catkin_ws/src/hpe_ros_package/src/models/pose_resnet_152_384x384.pth.tar"/>
-    <arg name="compress"   value="true"/>
+    <arg name="model_path" value="/home/developer/catkin_ws/src/hpe_ros_package/src/models/pose_resnet_50_384x384.pth.tar"/>
+    <arg name="compress"   value="false"/>
     
     <!-- config files for each backbone model are located into experiments folder !-->
-    <arg name="config_file" value="/home/developer/catkin_ws/src/hpe_ros_package/src/experiments/mpii/resnet152/384x384_d256x3_adam_lr1e-3.yaml"/>
+    <arg name="config_file" value="/home/developer/catkin_ws/src/hpe_ros_package/src/experiments/mpii/resnet50/384x384_d256x3_adam_lr1e-3.yaml"/>
     
     <node name="hpe_simplebaselines_node" pkg="hpe_ros_package" type="hpe_ros_inference.py" args="--frequency $(arg frequency) --cfg $(arg config_file) --model-file $(arg model_path) " output="screen"/>
 
@@ -15,6 +15,7 @@
     <node name="hand_pose_estimation_node" pkg="hpe_ros_package" type="hand_pose_estimation.py" args="$(arg frequency) " output="screen" />
     ?>    
 
+    <!-- https://github.com/ros-drivers/usb_cam/issues/75 -->
     <node name="usb_camera" pkg="usb_cam" type="usb_cam_node" launch-prefix="bash -c 'sleep 5; $0 $@'" output="screen" >
         <param name="video_device" value="$(arg video_dev)" />  
         <param name="image_width" value="640" />
@@ -22,10 +23,12 @@
         <param name="pixel_format" value="yuyv" />
         <param name="camera_frame_id" value="usb_cam" />
         <param name="io_method" value="mmap"/>
+        <param name="framerate" value="20"/>
     </node>
     
     <group if="$(arg compress)">
 
+        <!-- Neccessary compressed_image_transport ROS package !-->
         <node name="republish" type="republish" pkg="image_transport" output="screen" args="raw in:=/usb_camera/image_raw compressed out:=/usb_camera/image_raw" />
     
     </group>
